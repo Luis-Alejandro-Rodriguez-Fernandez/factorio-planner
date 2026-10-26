@@ -1,0 +1,25 @@
+{
+  "name": "blueprinter",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Editor web de planos de Factorio: pega un string, modela y copia el resultado.",
+  "type": "module",
+  "engines": {
+    "node": ">=20.19"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@fontsource/jetbrains-mono": "5.3.0",
+    "@fontsource/titillium-web": "5.3.0",
+    "pako": "2.2.0"
+  },
+  "devDependencies": {
+    "vite": "8.3.4",
+    "vitest": "5.0.3"
+  }
+}
