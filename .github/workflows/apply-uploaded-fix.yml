@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - '.bootstrap/trigger3.txt'
+      - '.bootstrap/trigger4.txt'
 
 permissions:
   contents: write
@@ -24,7 +24,7 @@ jobs:
             .bootstrap/chunk01.txt .bootstrap/chunk02.txt \
             .bootstrap/fix03-0.txt .bootstrap/f31-0.txt .bootstrap/f31-1.txt .bootstrap/f31-2.txt .bootstrap/fix03-2.txt \
             .bootstrap/chunk04.txt \
-            .bootstrap/f50-0.txt .bootstrap/g51-0.txt .bootstrap/g51-1.txt .bootstrap/g51-2.txt .bootstrap/g51-3.txt .bootstrap/f50-2.txt \
+            .bootstrap/f50-0.txt .bootstrap/g51-0.txt .bootstrap/g51-1.txt .bootstrap/h52-0.txt .bootstrap/h52-1.txt .bootstrap/g51-3.txt .bootstrap/f50-2.txt \
             | base64 --decode > /tmp/factorio-planner.zip
           unzip -t /tmp/factorio-planner.zip
           rm -rf /tmp/factorio-fix
