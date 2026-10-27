@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - '.bootstrap/chunk05.txt'
+      - '.bootstrap/trigger.txt'
 
 permissions:
   contents: write
