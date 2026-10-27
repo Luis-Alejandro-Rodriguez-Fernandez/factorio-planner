@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - '.bootstrap/trigger8.txt'
+      - '.bootstrap/trigger9.txt'
 
 permissions:
   contents: write
@@ -42,9 +42,8 @@ jobs:
           mkdir -p /tmp/factorio-fix
           unzip -q /tmp/factorio-planner.zip -d /tmp/factorio-fix
           shopt -s dotglob
-          cp -a /tmp/factorio-fix/factorio-planner/. .
+          rsync -a --delete --exclude='.git/' --exclude='.github/workflows/' --exclude='.bootstrap/' /tmp/factorio-fix/factorio-planner/ ./
           rm -rf .bootstrap
-          rm -f .github/workflows/apply-uploaded-fix.yml
 
       - name: Commit uploaded fix
         shell: bash
