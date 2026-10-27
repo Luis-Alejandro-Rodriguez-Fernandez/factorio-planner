@@ -95,3 +95,51 @@ export function slotsAtEnd(x, y, h) {
   }
   return out;
 }
+
+// ---------- planificador de vías (A*), como el del juego ----------
+class Heap {
+  constructor() { this.a = []; }
+  get size() { return this.a.length; }
+  push(v) { const a = this.a; a.push(v); let i = a.length - 1; while (i) { const p = (i - 1) >> 1; if (a[p][0] <= a[i][0]) break; [a[p], a[i]] = [a[i], a[p]]; i = p; } }
+  pop() { const a = this.a, top = a[0], last = a.pop(); if (a.length) { a[0] = last; let i = 0; for (;;) { const l = 2 * i + 1, r = l + 1; let m = i; if (l < a.length && a[l][0] < a[m][0]) m = l; if (r < a.length && a[r][0] < a[m][0]) m = r; if (m === i) break; [a[m], a[i]] = [a[i], a[m]]; i = m; } } return top; }
+}
+let RMOVES = null;
+/** Movimientos posibles según el rumbo de marcha: qué pieza se pone, dónde queda su centro y en qué punto y rumbo se sale. */
+export function railMoves() {
+  if (RMOVES) return RMOVES;
+  RMOVES = Array.from({ length: 16 }, () => []);
+  for (const [name, dirs] of [['straight-rail', [0, 2, 4, 6]], ['half-diagonal-rail', [0, 2, 4, 6]], ['curved-rail-a', [0, 2, 4, 6, 8, 10, 12, 14]], ['curved-rail-b', [0, 2, 4, 6, 8, 10, 12, 14]]]) {
+    for (const d of dirs) {
+      const E = railEndsOf(name, 0, 0, d);
+      for (const [a, b] of [[E[0], E[1]], [E[1], E[0]]]) {
+        const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+        RMOVES[(a[2] + 8) % 16].push({ name, d, cx: -a[0], cy: -a[1], ex: b[0] - a[0], ey: b[1] - a[1], h: b[2], cost: len + (name[0] === 'c' ? 1.5 : name[0] === 'h' ? 0.8 : 0) });
+      }
+    }
+  }
+  return RMOVES;
+}
+/** A*: starts = [[x, y, rumbo]]; goal = { x, y, h } o { x, y, hs: [rumbos] } exacto, o { x, y, r } (rumbo recto o diagonal a menos de r). Devuelve las piezas (con .end = [x, y, rumbo]) o null. */
+export function planRails(starts, goal) {
+  const M = railMoves(), key = (x, y, h) => x + ',' + y + ',' + h, gs = new Map(), prev = new Map(), open = new Heap(), hs = goal.hs || (goal.h != null ? [goal.h] : null);
+  let x0 = goal.x, x1 = goal.x, y0 = goal.y, y1 = goal.y;
+  for (const [x, y] of starts) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+  x0 -= 20; x1 += 20; y0 -= 20; y1 += 20;
+  const H = (x, y) => Math.hypot(x - goal.x, y - goal.y);
+  for (const [x, y, h] of starts) { const k = key(x, y, h); gs.set(k, 0); prev.set(k, null); open.push([H(x, y), 0, x, y, h]); }
+  const t0 = performance.now(); let n = 0;
+  while (open.size) {
+    const [, g, x, y, h] = open.pop(), k = key(x, y, h);
+    if (g > gs.get(k)) continue;
+    if (g > 0 && (hs ? x === goal.x && y === goal.y && hs.includes(h) : h % 2 === 0 && H(x, y) <= goal.r)) {
+      const out = []; for (let c = k; prev.get(c); c = prev.get(c)[0]) out.push(prev.get(c)[1]); out.reverse(); out.end = [x, y, h]; return out;
+    }
+    if (++n > 40000 || (n % 1024 === 0 && performance.now() - t0 > 40)) return null;
+    for (const m of M[h]) {
+      const nx = x + m.ex, ny = y + m.ey; if (nx < x0 || nx > x1 || ny < y0 || ny > y1) continue;
+      const nk = key(nx, ny, m.h), ng = g + m.cost;
+      if (ng < (gs.has(nk) ? gs.get(nk) : Infinity)) { gs.set(nk, ng); prev.set(nk, [k, { name: m.name, x: x + m.cx, y: y + m.cy, dir: m.d, extra: {} }]); open.push([ng + H(nx, ny), ng, nx, ny, m.h]); }
+    }
+  }
+  return null;
+}

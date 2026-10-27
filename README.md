@@ -7,13 +7,14 @@ Funciona entero en el navegador: no hay servidor ni cuentas, y los planos que gu
 ## Qué puedes hacer
 
 - Importar planos y libros de planos de Factorio 2.0 y 1.1 con Ctrl+V.
-- Construir desde cero con cintas, insertadores, máquinas, energía, fluidos, defensa, suelos y trenes. En trenes hay vías rectas y diagonales, curvas de 90° y 45° que se empalman solas, señales, paradas, locomotoras y vagones.
+- Construir desde cero con los 107 edificios de Factorio 2.0 y Space Age, con sus tamaños reales. Los que mueven fluidos o calor muestran sus conexiones, y las tuberías solo se unen donde el edificio tiene una.
+- Trazar vías como en el juego: pasa sobre una vía y haz clic en la flecha verde. El trazado sigue al cursor con rectas, curvas y diagonales; cada clic lo coloca y sigue desde su final, y puede empalmar con otra vía o hacer un desvío en mitad de ella. También hay curvas sueltas de 90° y 45°, señales, paradas, locomotoras y vagones.
 - Copiar la selección o el plano entero como un string listo para el juego.
 - Exportar para 2.0 o para 1.1, con nombres, direcciones, módulos y cables traducidos.
 
 ## Arranque rápido
 
-Necesitas Node.js 20.19 o superior.
+Necesitas Node.js 22.
 
 ```bash
 npm install
@@ -45,7 +46,7 @@ Cada push y cada pull request ejecutan las pruebas y la compilación en GitHub A
 ## Desplegar en Vercel
 
 1. En [vercel.com](https://vercel.com), entra en **Add New → Project** e importa el repositorio.
-2. Vercel detecta Vite: usa `npm run build` y publica la carpeta `dist`. No hay que cambiar nada.
+2. Vercel lee `vercel.json`: instala con `npm install --legacy-peer-deps`, compila con `npm run build` y publica `dist`. No hay que cambiar nada.
 3. Pulsa **Deploy**.
 
 A partir de ahí, cada push a `main` se publica en producción y cada pull request recibe su propia URL de vista previa.
@@ -59,6 +60,12 @@ También puedes desplegar desde la terminal: `npx vercel` crea una vista previa 
 - [ ] Las pruebas pasan en GitHub Actions.
 - [ ] En la URL de vista previa: pega un string del juego, cambia algo, cópialo y vuelve a importarlo en Factorio.
 - [ ] Si algo falla después de publicar, ve a Vercel → **Deployments**, elige el despliegue anterior y pulsa **Instant Rollback**.
+
+### Si la instalación falla
+
+El npm 10 que traen Node 22 y Vercel falla al instalar este proyecto con `Cannot read properties of null (reading 'edgesOut')` si no se usa `--legacy-peer-deps`. Por eso `vercel.json` y el flujo de GitHub Actions instalan con esa opción, y `.npmrc` la activa al ejecutar `npm install` en local.
+
+Sube también `package-lock.json` al repositorio: fija las versiones exactas con las que se probó el proyecto.
 
 ## Estructura
 
@@ -80,7 +87,9 @@ vercel.json             Cabeceras para Vercel
 
 La geometría de las vías de Factorio 2.0 (rectas, diagonales, medias diagonales y curvas A y B) se dedujo de los planos que trae el propio juego en la Factoriopedia y en «Consejos y trucos». Con ese modelo, todos los extremos de las curvas de esos planos empalman con otra pieza. Las reglas para colocar señales y paradas salen de los mismos planos.
 
-`tests/rails.test.js` comprueba esas relaciones y que cada variante de curva empalma.
+`tests/rails.test.js` comprueba esas relaciones, que cada variante de curva empalma y que el planificador une vías, hace desvíos y empalma en mitad de otra vía.
+
+Los tamaños de los edificios y la posición de sus conexiones de tubería y calor también salen de los datos del juego.
 
 ## Límites conocidos
 
