@@ -1,11 +1,12 @@
 import { deflate, inflate } from 'pako';
+import { MACHINE_CATS, RECIPE_LIST, GAME_VERSION } from './gamedata.js';
 
 const pako = { deflate, inflate };
 
 /* ===== Núcleo: definiciones, códec y conversión de planos (sin DOM) ===== */
 export const BP = (() => {
 const DEFS = {};
-const CATS = [['belts','Cintas'],['trains','Trenes'],['ins','Insertadores'],['store','Almacenaje'],['fluid','Fluidos'],['power','Energía'],['prod','Producción'],['logic','Robots y circuitos'],['def','Defensa'],['space','Espacio y carga'],['editor','Ocultos y modo editor'],['tiles','Suelos']];
+const CATS = [['belts','Cintas'],['trains','Trenes'],['ins','Insertadores'],['store','Almacenaje'],['fluid','Fluidos'],['power','Energía'],['prod','Producción'],['logic','Robots y circuitos'],['def','Defensa'],['vehicles','Vehículos'],['space','Espacio y carga'],['editor','Ocultos y modo editor'],['tiles','Suelos']];
 function D(name, label, cat, w, h, kind, color, o) { DEFS[name] = Object.assign({ name, label, cat, w, h, kind, color, rot: true }, o || {}); }
 const Y = '#e3ad1a', R = '#dd4636', B = '#3a9be2', G = '#79c142';
 D('transport-belt','Cinta transportadora','belts',1,1,'belt',Y);
@@ -106,7 +107,7 @@ D('asteroid-collector','Recolector de asteroides','space',3,3,'machine','#5d6f80
 D('thruster','Propulsor','space',4,5,'machine','#8b6b4b',{g:'rocket',sa:1,rot:false,fluid:1});
 D('cargo-bay','Bahía de carga','space',4,4,'machine','#7a8590',{g:'tank',sa:1});
 D('landing-pad-unloading-bay','Bahía de descarga','space',4,4,'machine','#6f7c88',{g:'tank',sa:1});
-D('cargo-landing-pad','Plataforma de aterrizaje de carga','space',8,8,'machine','#5f6b75',{g:'rocket',sa:1,ab:'Plataforma de aterrizaje'});
+D('cargo-landing-pad','Plataforma de aterrizaje de carga','space',8,8,'machine','#5f6b75',{g:'rocket',ab:'Plataforma de aterrizaje'});
 // trenes: vías de Factorio 2.0 (rejilla de 2×2, curvas A y B, media diagonal)
 D('straight-rail','Vía recta','trains',2,2,'rail','#8a7660',{g2:1,rt:'S'});
 D('rail-curve-90','Curva de 90°','trains',13,13,'tmpl','#8a7660',{tmpl:'c90'});
@@ -137,6 +138,20 @@ D('linked-chest','Cofre enlazado','editor',1,1,'chest','#5aa0a0',{rot:false});
 D('infinity-pipe','Tubería infinita','editor',1,1,'pipe','#c552b8',{rot:false,fluid:1});
 D('heat-interface','Interfaz de calor','editor',1,1,'machine','#c95f3a',{rot:false,g:'flame',heat:1});
 D('electric-energy-interface','Interfaz de energía eléctrica','editor',2,2,'machine','#6f5aa5',{rot:false,g:'bolt',ab:'Energía infinita'});
+D('lane-splitter','Divisor de carriles','editor',1,1,'machine','#8a8a8a',{g:'gear'});
+D('bottomless-chest','Cofre sin fondo','editor',1,1,'chest','#4a4f57',{rot:false});
+D('proxy-container','Contenedor intermediario','editor',1,1,'chest','#6f8c8c',{rot:false});
+D('one-way-valve','Válvula antirretorno','editor',1,1,'machine','#5f86a8',{g:'drop',fluid:1});
+D('overflow-valve','Válvula de desbordamiento','editor',1,1,'machine','#5f86a8',{g:'drop',fluid:1});
+D('top-up-valve','Válvula de relleno','editor',1,1,'machine','#5f86a8',{g:'drop',fluid:1});
+D('burner-generator','Generador de combustión','editor',3,5,'machine','#8e7a5a',{g:'bolt',ab:'Gen. combustión'});
+D('infinity-cargo-wagon','Vagón de carga infinito','editor',2,5,'train','#c552b8',{g2:1});
+// vehículos: en 2.0 se guardan en los planos con su orientación, como el material rodante
+D('car','Coche','vehicles',2,2,'vehicle','#c0563c');
+D('tank','Tanque','vehicles',2,3,'vehicle','#6b7a45');
+D('spidertron','Spidertron','vehicles',3,3,'vehicle','#5a6470',{spider:1});
+// las máquinas que guardan receta en el plano salen de los datos del juego
+for (const n of Object.keys(MACHINE_CATS)) if (DEFS[n]) DEFS[n].recipe = 1;
 
 const TILES = {
   'stone-path': { label: 'Camino de piedra', color: '#8a7c63', item: 'stone-brick' },
@@ -158,16 +173,77 @@ function tileDef(n) {
   if (/hazard/.test(n)) { const r = /refined/.test(n); return { label: n, color: r ? '#bf8a2a' : '#cfa032', item: r ? 'refined-hazard-concrete' : 'hazard-concrete', hz: 1 }; }
   return { label: n, color: '#787878', item: n };
 }
-const RECIPES = [['iron-gear-wheel','Engranaje'],['copper-cable','Cable de cobre'],['electronic-circuit','Circuito verde'],['advanced-circuit','Circuito rojo'],['processing-unit','Circuito azul'],
-['automation-science-pack','Ciencia roja'],['logistic-science-pack','Ciencia verde'],['military-science-pack','Ciencia militar'],['chemical-science-pack','Ciencia azul'],['production-science-pack','Ciencia morada'],['utility-science-pack','Ciencia amarilla'],
-['transport-belt','Cinta transportadora'],['inserter','Insertador'],['fast-inserter','Insertador rápido'],['pipe','Tubería'],['iron-stick','Barra de hierro'],['steel-plate','Placa de acero'],['stone-brick','Ladrillo de piedra'],['rail','Raíl'],
-['engine-unit','Motor'],['electric-engine-unit','Motor eléctrico'],['flying-robot-frame','Marco de robot'],['low-density-structure','Estructura ligera'],['rocket-fuel','Combustible de cohete'],['solar-panel','Panel solar'],['accumulator','Acumulador'],
-['plastic-bar','Plástico'],['sulfur','Azufre'],['sulfuric-acid','Ácido sulfúrico'],['battery','Batería'],['lubricant','Lubricante'],['explosives','Explosivos'],['solid-fuel-from-light-oil','Combustible sólido'],
-['basic-oil-processing','Refinado básico'],['advanced-oil-processing','Refinado avanzado'],['coal-liquefaction','Licuefacción de carbón'],['heavy-oil-cracking','Craqueo de pesado'],['light-oil-cracking','Craqueo de ligero'],
-['speed-module','Módulo de velocidad'],['productivity-module','Módulo de productividad'],['efficiency-module','Módulo de eficiencia'],['concrete','Hormigón'],['refined-concrete','Hormigón refinado'],['landfill','Relleno'],
-['uranium-processing','Procesado de uranio'],['kovarex-enrichment-process','Enriquecimiento Kovarex'],['uranium-fuel-cell','Celda de uranio'],['nuclear-fuel','Combustible nuclear'],['rocket-part','Parte de cohete'],
-['firearm-magazine','Cargador de munición'],['piercing-rounds-magazine','Munición perforante'],['grenade','Granada'],['stone-wall','Muro de piedra'],['medium-electric-pole','Poste mediano']];
-const RECIPE_ES = Object.fromEntries(RECIPES);
+// nombres en español de las recetas que no se llaman como un edificio o un suelo de la paleta
+const RECIPE_ES = {
+  rail: 'Raíl', 'casting-pipe': 'Moldeo de tubería', 'casting-pipe-to-ground': 'Moldeo de tubería subterránea', 'logistic-robot': 'Robot logístico', 'construction-robot': 'Robot de construcción',
+  concrete: 'Hormigón', 'hazard-concrete': 'Hormigón de peligro', 'refined-concrete': 'Hormigón refinado', 'refined-hazard-concrete': 'Hormigón refinado de peligro', satellite: 'Satélite',
+  'basic-oil-processing': 'Refinado básico de petróleo', 'advanced-oil-processing': 'Refinado avanzado de petróleo', 'coal-liquefaction': 'Licuefacción de carbón', 'simple-coal-liquefaction': 'Licuefacción simple de carbón',
+  'heavy-oil-cracking': 'Craqueo de petróleo pesado a ligero', 'light-oil-cracking': 'Craqueo de petróleo ligero a gas', 'solid-fuel-from-petroleum-gas': 'Combustible sólido de gas de petróleo',
+  'solid-fuel-from-light-oil': 'Combustible sólido de petróleo ligero', 'solid-fuel-from-heavy-oil': 'Combustible sólido de petróleo pesado', lubricant: 'Lubricante', 'sulfuric-acid': 'Ácido sulfúrico',
+  'acid-neutralisation': 'Neutralización de ácido', 'steam-condensation': 'Condensación de vapor', 'ice-melting': 'Fusión de hielo', 'plastic-bar': 'Barra de plástico', sulfur: 'Azufre', battery: 'Batería',
+  explosives: 'Explosivos', carbon: 'Carbono', 'coal-synthesis': 'Síntesis de carbón', barrel: 'Barril',
+  'iron-gear-wheel': 'Engranaje de hierro', 'iron-stick': 'Barra de hierro', 'copper-cable': 'Cable de cobre', 'electronic-circuit': 'Circuito electrónico (verde)', 'advanced-circuit': 'Circuito avanzado (rojo)',
+  'processing-unit': 'Unidad de procesamiento (azul)', 'engine-unit': 'Motor', 'electric-engine-unit': 'Motor eléctrico', 'flying-robot-frame': 'Estructura de robot volador', 'low-density-structure': 'Estructura de baja densidad',
+  'rocket-fuel': 'Combustible para cohetes', 'rocket-part': 'Parte de cohete', 'uranium-processing': 'Procesamiento de uranio', 'uranium-fuel-cell': 'Celda de combustible de uranio',
+  'nuclear-fuel-reprocessing': 'Reprocesamiento de combustible nuclear', 'kovarex-enrichment-process': 'Enriquecimiento Kovarex', 'nuclear-fuel': 'Combustible nuclear',
+  'molten-iron-from-lava': 'Hierro fundido a partir de lava', 'molten-copper-from-lava': 'Cobre fundido a partir de lava', 'iron-ore-melting': 'Fundición de mineral de hierro', 'copper-ore-melting': 'Fundición de mineral de cobre',
+  'casting-iron': 'Moldeo de placa de hierro', 'casting-copper': 'Moldeo de placa de cobre', 'casting-steel': 'Moldeo de placa de acero', 'casting-iron-gear-wheel': 'Moldeo de engranaje de hierro',
+  'casting-iron-stick': 'Moldeo de barra de hierro', 'casting-low-density-structure': 'Moldeo de estructura de baja densidad', 'concrete-from-molten-iron': 'Hormigón a partir de hierro fundido', 'casting-copper-cable': 'Moldeo de cable de cobre',
+  'tungsten-carbide': 'Carburo de wolframio', 'tungsten-plate': 'Placa de wolframio', 'holmium-solution': 'Solución de holmio', 'holmium-plate': 'Placa de holmio', superconductor: 'Superconductor', electrolyte: 'Electrolito', supercapacitor: 'Supercondensador',
+  'yumako-processing': 'Procesamiento de yumako', 'jellynut-processing': 'Procesamiento de gelinuez', 'iron-bacteria': 'Bacterias de hierro', 'iron-bacteria-cultivation': 'Cultivo de bacterias de hierro',
+  'copper-bacteria': 'Bacterias de cobre', 'copper-bacteria-cultivation': 'Cultivo de bacterias de cobre', 'nutrients-from-spoilage': 'Nutrientes a partir de descomposición', 'nutrients-from-yumako-mash': 'Nutrientes a partir de puré de yumako',
+  'nutrients-from-bioflux': 'Nutrientes a partir de bioflujo', 'pentapod-egg': 'Huevo de pentápodo', 'rocket-fuel-from-jelly': 'Combustible para cohetes a partir de gelatina', biolubricant: 'Biolubricante', bioplastic: 'Bioplástico',
+  biosulfur: 'Bioazufre', bioflux: 'Bioflujo', 'burnt-spoilage': 'Descomposición quemada', 'carbon-fiber': 'Fibra de carbono', 'biter-egg': 'Huevo de mordedor', 'tree-seed': 'Semilla de árbol', 'fish-breeding': 'Cría de peces',
+  'nutrients-from-fish': 'Nutrientes a partir de pescado', 'nutrients-from-biter-egg': 'Nutrientes a partir de huevo de mordedor', 'ammoniacal-solution-separation': 'Separación de solución amoniacal',
+  'solid-fuel-from-ammonia': 'Combustible sólido a partir de amoníaco', 'ammonia-rocket-fuel': 'Combustible para cohetes de amoníaco', fluoroketone: 'Fluorocetona', 'fluoroketone-cooling': 'Enfriamiento de fluorocetona',
+  lithium: 'Litio', 'quantum-processor': 'Procesador cuántico', 'fusion-power-cell': 'Celda de energía de fusión',
+  'automation-science-pack': 'Ciencia de automatización (roja)', 'logistic-science-pack': 'Ciencia logística (verde)', 'military-science-pack': 'Ciencia militar (gris)', 'chemical-science-pack': 'Ciencia química (azul)',
+  'production-science-pack': 'Ciencia de producción (morada)', 'utility-science-pack': 'Ciencia de utilidad (amarilla)', 'space-science-pack': 'Ciencia espacial (blanca)', 'metallurgic-science-pack': 'Ciencia metalúrgica',
+  'agricultural-science-pack': 'Ciencia agrícola', 'electromagnetic-science-pack': 'Ciencia electromagnética', 'cryogenic-science-pack': 'Ciencia criogénica', 'promethium-science-pack': 'Ciencia de prometio',
+  'space-platform-starter-pack': 'Paquete inicial de plataforma espacial', 'metallic-asteroid-crushing': 'Trituración de asteroide metálico', 'carbonic-asteroid-crushing': 'Trituración de asteroide carbónico',
+  'oxide-asteroid-crushing': 'Trituración de asteroide de óxido', 'metallic-asteroid-reprocessing': 'Reprocesado de asteroide metálico', 'carbonic-asteroid-reprocessing': 'Reprocesado de asteroide carbónico',
+  'oxide-asteroid-reprocessing': 'Reprocesado de asteroide de óxido', 'advanced-metallic-asteroid-crushing': 'Trituración avanzada de asteroide metálico', 'advanced-carbonic-asteroid-crushing': 'Trituración avanzada de asteroide carbónico',
+  'advanced-oxide-asteroid-crushing': 'Trituración avanzada de asteroide de óxido', 'thruster-fuel': 'Combustible de propulsor', 'advanced-thruster-fuel': 'Combustible de propulsor avanzado',
+  'thruster-oxidizer': 'Oxidante de propulsor', 'advanced-thruster-oxidizer': 'Oxidante de propulsor avanzado',
+  'solar-panel-equipment': 'Panel solar portátil', 'fission-reactor-equipment': 'Reactor de fisión portátil', 'fusion-reactor-equipment': 'Reactor de fusión portátil', 'battery-equipment': 'Batería personal',
+  'battery-mk2-equipment': 'Batería personal MK2', 'battery-mk3-equipment': 'Batería personal MK3', 'belt-immunity-equipment': 'Inmunidad a cintas', 'exoskeleton-equipment': 'Exoesqueleto',
+  'personal-roboport-equipment': 'Roboport personal', 'personal-roboport-mk2-equipment': 'Roboport personal MK2', 'night-vision-equipment': 'Visión nocturna', 'toolbelt-equipment': 'Cinturón de herramientas',
+  'energy-shield-equipment': 'Escudo de energía', 'energy-shield-mk2-equipment': 'Escudo de energía MK2', 'personal-laser-defense-equipment': 'Defensa láser personal', 'discharge-defense-equipment': 'Defensa de descarga',
+  'artillery-shell': 'Proyectil de artillería', 'atomic-bomb': 'Bomba atómica', 'cannon-shell': 'Proyectil de cañón', 'capture-robot-rocket': 'Cohete con robot de captura', 'cliff-explosives': 'Explosivos para acantilados',
+  'cluster-grenade': 'Granada de racimo', 'combat-shotgun': 'Escopeta de combate', 'defender-capsule': 'Cápsula de defensor', 'destroyer-capsule': 'Cápsula de destructor', 'distractor-capsule': 'Cápsula de distractor',
+  'explosive-cannon-shell': 'Proyectil de cañón explosivo', 'explosive-rocket': 'Cohete explosivo', 'explosive-uranium-cannon-shell': 'Proyectil de cañón de uranio explosivo', 'firearm-magazine': 'Cargador de munición',
+  flamethrower: 'Lanzallamas', 'flamethrower-ammo': 'Munición de lanzallamas', grenade: 'Granada', 'heavy-armor': 'Armadura pesada', 'light-armor': 'Armadura ligera', 'mech-armor': 'Armadura mecánica',
+  'modular-armor': 'Armadura modular', 'piercing-rounds-magazine': 'Cargador de munición perforante', 'piercing-shotgun-shell': 'Cartucho de escopeta perforante', 'poison-capsule': 'Cápsula de veneno',
+  'power-armor': 'Armadura de energía', 'power-armor-mk2': 'Armadura de energía MK2', railgun: 'Cañón de riel', 'railgun-ammo': 'Munición de cañón de riel', 'repair-pack': 'Kit de reparación', rocket: 'Cohete',
+  'rocket-launcher': 'Lanzacohetes', shotgun: 'Escopeta', 'shotgun-shell': 'Cartucho de escopeta', 'slowdown-capsule': 'Cápsula ralentizadora', 'submachine-gun': 'Subfusil', 'tesla-ammo': 'Munición Tesla',
+  teslagun: 'Pistola Tesla', 'uranium-cannon-shell': 'Proyectil de cañón de uranio', 'uranium-rounds-magazine': 'Cargador de munición de uranio',
+  'speed-module': 'Módulo de velocidad', 'productivity-module': 'Módulo de productividad', 'efficiency-module': 'Módulo de eficiencia', 'quality-module': 'Módulo de calidad',
+};
+const FLUID_ES = { water: 'agua', 'crude-oil': 'petróleo crudo', 'heavy-oil': 'petróleo pesado', 'light-oil': 'petróleo ligero', 'petroleum-gas': 'gas de petróleo', lubricant: 'lubricante', 'sulfuric-acid': 'ácido sulfúrico', 'fluoroketone-hot': 'fluorocetona caliente', 'fluoroketone-cold': 'fluorocetona fría' };
+function recipeName(r) {
+  r = String(r); if (RECIPE_ES[r]) return RECIPE_ES[r];
+  const tier = /^(.*-module)-(\d)$/.exec(r); if (tier && RECIPE_ES[tier[1]]) return RECIPE_ES[tier[1]] + ' ' + tier[2];
+  const bar = /^(empty-)?(.+)-barrel$/.exec(r); if (bar && FLUID_ES[bar[2]]) return (bar[1] ? 'Vaciar barril de ' : 'Llenar barril de ') + FLUID_ES[bar[2]];
+  if (DEFS[r] && DEFS[r].cat) return DEFS[r].label; if (TILES[r]) return TILES[r].label;
+  return r.replace(/-/g, ' ');
+}
+const RECIPE_INFO = new Map(RECIPE_LIST.map(([n, cats, sa], i) => [n, { cats, sa: !!sa, i }]));
+/** Todas las recetas que alguna máquina puede fabricar, en el orden de la Factoriopedia: [nombre, nombre en español]. */
+const RECIPES = RECIPE_LIST.map(([n]) => [n, recipeName(n)]);
+const RFOR = new Map();
+/** Recetas que puede fabricar una máquina (null si no guarda receta): [{ name, label, sa }]. */
+function recipesFor(machine) {
+  const cats = MACHINE_CATS[machine]; if (!cats) return null;
+  let l = RFOR.get(machine);
+  if (!l) { l = RECIPE_LIST.filter(r => r[1].some(c => cats.includes(c))).map(([name, , sa]) => ({ name, label: recipeName(name), sa: !!sa })); RFOR.set(machine, l); }
+  return l;
+}
+/** true si la máquina puede fabricar la receta, false si no, null si no se sabe (máquina o receta de un mod). */
+function canCraft(machine, recipe) {
+  const cats = MACHINE_CATS[machine], r = RECIPE_INFO.get(recipe);
+  if (!cats || !r) return null;
+  return r.cats.some(c => cats.includes(c));
+}
 
 const N1TO2 = { 'stack-inserter': 'bulk-inserter', 'stack-filter-inserter': 'bulk-inserter', 'filter-inserter': 'fast-inserter',
   'logistic-chest-passive-provider': 'passive-provider-chest', 'logistic-chest-active-provider': 'active-provider-chest',
@@ -416,7 +492,7 @@ function buildBlueprint(o) {
       delete x.use_filters;
     }
     const r = { entity_number: i + 1, name, position: { x: e.x, y: e.y } };
-    if (DEFS[e.name] && DEFS[e.name].kind === 'train') { const keep = typeof x.orientation === 'number' && Math.round(x.orientation * 16) % 16 === (e.dir | 0); x.orientation = keep ? x.orientation : (e.dir | 0) / 16; return Object.assign(r, x); }
+    if (DEFS[e.name] && (DEFS[e.name].kind === 'train' || DEFS[e.name].kind === 'vehicle')) { const keep = typeof x.orientation === 'number' && Math.round(x.orientation * 16) % 16 === (e.dir | 0); x.orientation = keep ? x.orientation : (e.dir | 0) / 16; return Object.assign(r, x); }
     let dir = e.dir | 0; if (T === 1) dir = Math.round(dir / 2) % 8;
     if (dir) r.direction = dir;
     return Object.assign(r, x);
@@ -436,10 +512,9 @@ function buildBlueprint(o) {
 // conexiones de fluido y calor sacadas de los datos del juego; las de PORTCOND solo se usan con recetas de fluidos
 const PORTS = {"storage-tank":[[-1,-1,0,2,0],[1,1,4,2,0],[1,1,8,2,0],[-1,-1,12,2,0]],"pump":[[0,-0.5,0,1,0],[0,0.5,8,0,0]],"boiler":[[-1,0.5,12,2,0],[1,0.5,4,2,0],[0,-0.5,0,1,0]],"steam-engine":[[0,2,8,2,0],[0,-2,0,2,0]],"nuclear-reactor":[[-2,-2,0,2,1],[0,-2,0,2,1],[2,-2,0,2,1],[2,-2,4,2,1],[2,0,4,2,1],[2,2,4,2,1],[2,2,8,2,1],[0,2,8,2,1],[-2,2,8,2,1],[-2,2,12,2,1],[-2,0,12,2,1],[-2,-2,12,2,1]],"heat-exchanger":[[-1,0.5,12,2,0],[1,0.5,4,2,0],[0,-0.5,0,1,0],[0,0.5,8,2,1]],"steam-turbine":[[0,2,8,2,0],[0,-2,0,2,0]],"fusion-reactor":[[-2.5,-1.5,12,2,0],[-2.5,1.5,12,2,0],[2.5,-1.5,4,2,0],[2.5,1.5,4,2,0],[-1.5,2.5,8,2,0],[1.5,2.5,8,2,0],[-1.5,-2.5,0,2,0],[1.5,-2.5,0,2,0]],"fusion-generator":[[-1,2,8,0,0],[1,2,8,0,0],[0,-2,0,1,0],[-1,0,12,1,0],[1,0,4,1,0],[-1,-1,12,1,0],[1,-1,4,1,0],[-1,-2,0,1,0],[1,-2,0,1,0]],"electric-mining-drill":[[-1,0,12,2,0],[1,0,4,2,0],[0,1,8,2,0]],"big-mining-drill":[[-2,-1,12,2,0],[2,-1,4,2,0],[1,2,8,2,0],[-1,2,8,2,0]],"offshore-pump":[[0,0,8,1,0]],"foundry":[[-1,2,8,0,0],[1,2,8,0,0],[-1,-2,0,1,0],[1,-2,0,1,0]],"biochamber":[[-1,-1,0,0,0],[1,-1,0,0,0],[1,1,8,1,0],[-1,1,8,1,0]],"assembling-machine-2":[[0,-1,0,0,0],[0,1,8,1,0]],"assembling-machine-3":[[0,-1,0,0,0],[0,1,8,1,0]],"oil-refinery":[[-1,2,8,0,0],[1,2,8,0,0],[-2,-2,0,1,0],[0,-2,0,1,0],[2,-2,0,1,0]],"chemical-plant":[[-1,-1,0,0,0],[1,-1,0,0,0],[-1,1,8,1,0],[1,1,8,1,0]],"electromagnetic-plant":[[-1.5,0.5,12,2,0],[1.5,-0.5,4,2,0],[0.5,1.5,8,2,0],[-0.5,-1.5,0,2,0]],"cryogenic-plant":[[-2,2,8,0,0],[0,2,8,0,0],[2,2,8,0,0],[-2,-2,0,1,0],[0,-2,0,1,0],[2,-2,0,1,0]],"heating-tower":[[0,-1,0,2,1],[1,0,4,2,1],[0,1,8,2,1],[-1,0,12,2,1]],"thruster":[[-1.5,-2,12,2,0],[1.5,0,4,2,0],[1.5,-2,4,2,0],[-1.5,0,12,2,0]],"flamethrower-turret":[[-0.5,1,12,2,0],[0.5,1,4,2,0]],"pumpjack":[[0,0,0,1,0,[[1,-1],[1,1],[-1,1],[-1,-1]]]]};
 const PORTCOND = new Set(["assembling-machine-2", "assembling-machine-3", "big-mining-drill", "biochamber", "cryogenic-plant", "electric-mining-drill", "electromagnetic-plant", "foundry"]);
-function recipeName(r) { return RECIPE_ES[r] || String(r).replace(/-/g, ' '); }
 
 return { PORTS, PORTCOND, DEFS, CATS, TILES, RECIPES, N1TO2, N2TO1, def, sz, tileDef, encVer, decVer, verStr, VDEF, hasPako, encode, encodeSync, decode, looksLikeString,
-  parseBlueprint, buildBlueprint, flattenBook, convertBlueprint, buildBook, getSnap, setSnap, mapSched, mapStock, recipeName };
+  parseBlueprint, buildBlueprint, flattenBook, convertBlueprint, buildBook, getSnap, setSnap, mapSched, mapStock, recipeName, recipesFor, canCraft, MACHINE_CATS, GAME_VERSION };
 })();
 
 export default BP;

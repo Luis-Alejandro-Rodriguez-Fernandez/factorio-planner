@@ -213,3 +213,4 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
   .tb{gap:4px}
   .tb .btn{padding:5px 9px;font-size:13.5px}
 }
+.hint.err{color:var(--danger)}

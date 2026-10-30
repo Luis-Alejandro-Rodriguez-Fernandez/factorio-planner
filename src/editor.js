@@ -390,6 +390,13 @@ function dTrain(c, d, e, X, Y, W, H, s) {
   else { c.strokeStyle = 'rgba(0,0,0,.32)'; c.lineWidth = .07; c.beginPath(); for (let i = -2; i <= 2; i++) { c.moveTo(-w + .16, i); c.lineTo(w - .16, i); } c.stroke(); }
   c.restore();
 }
+function dSpider(c, d, X, Y, W, H) {
+  const cx = X + W / 2, cy = Y + H / 2, u = Math.min(W, H);
+  c.strokeStyle = shade(d.color, -.35); c.lineWidth = Math.max(1, u * .05); c.lineCap = 'round';
+  for (let i = 0; i < 8; i++) { const a = (i + .5) * Math.PI / 4; c.beginPath(); c.moveTo(cx, cy); c.lineTo(cx + Math.cos(a) * u * .46, cy + Math.sin(a) * u * .46); c.stroke(); }
+  c.fillStyle = d.color; c.beginPath(); c.arc(cx, cy, u * .22, 0, 7); c.fill(); c.strokeStyle = 'rgba(0,0,0,.6)'; c.lineWidth = Math.max(1, u * .03); c.stroke();
+  c.fillStyle = '#e5534b'; c.beginPath(); c.arc(cx, cy - u * .06, u * .05, 0, 7); c.fill();
+}
 // conexiones de fluido y calor (datos del juego): casilla interior y lado por el que conectan, giradas con el edificio
 function portList(e) {
   const pp = PORTS[e.name]; if (!pp) return null;
@@ -444,6 +451,7 @@ function drawEntBody(c, e, X, Y, W, H, s, info) {
     case 'railsig': return dSignal(c, d, X, Y, s, e.dir);
     case 'trainstop': return dTrainStop(c, d, e, X, Y, W, H, s);
     case 'train': return dTrain(c, d, e, X, Y, W, H, s);
+    case 'vehicle': return d.spider ? dSpider(c, d, X, Y, W, H) : dTrain(c, d, e, X, Y, W, H, s);
     default: return dMachine(c, d, e, X, Y, W, H, s, info.icon);
   }
 }
@@ -494,7 +502,7 @@ function groupBox(g) {
 }
 function ghostEnt() {
   const d = def(tool.name), dir = d.rot === false ? 0 : curDir, p = placePos(tool.name, dir, hover.wx, hover.wy);
-  const g = { name: tool.name, x: p.x, y: p.y, dir, extra: {} };
+  const g = { name: tool.name, x: p.x, y: p.y, dir, extra: Object.assign({}, tool.extra) };
   if (d.kind === 'ug') g.extra.type = autoUg(tool.name, p.x, p.y, dir, ugFlip);
   return g;
 }
@@ -741,7 +749,7 @@ function startPlace() {
     for (const g of gl.ents) { if (def(g.name).kind === 'rail') placeRail(g.name, g.x, g.y, g.dir); else tryPlace(g.name, g.x, g.y, g.dir); }
     return;
   }
-  const g = ghostEnt(); P.last = tryPlace(tool.name, g.x, g.y, g.dir);
+  const g = ghostEnt(); P.last = tryPlace(tool.name, g.x, g.y, g.dir, tool.extra);
 }
 function stepPlace(sx, sy) {
   if (tool.tile) return setTile(P.tx, P.ty, tool.name);
@@ -752,7 +760,7 @@ function stepPlace(sx, sy) {
     P.last = tryPlace(tool.name, P.tx + .5, P.ty + .5, dir);
   } else {
     const dir = d.rot === false ? 0 : curDir, p = placePos(tool.name, dir, P.tx + .5, P.ty + .5);
-    const id = tryPlace(tool.name, p.x, p.y, dir); if (id != null) P.last = id;
+    const id = tryPlace(tool.name, p.x, p.y, dir, tool.extra); if (id != null) P.last = id;
   }
 }
 function contPlace() {
@@ -845,7 +853,7 @@ function pipette() {
   const d = def(e.name);
   if (d.kind === 'rail' && !RAIL_TOOLS.has(e.name)) return toast('Para curvas usa «Curva de 90°» o «Curva de 45°» de la paleta', 'warn');
   if (!d.cat) return toast('Esa entidad no está en la paleta', 'warn');
-  tool = { name: e.name, tile: false }; curDir = e.dir; ugFlip = d.kind === 'ug' && ugType(e) !== autoUg(e.name, e.x, e.y, e.dir, false);
+  tool = { name: e.name, tile: false, extra: recipeExtra(e) }; curDir = e.dir; ugFlip = d.kind === 'ug' && ugType(e) !== autoUg(e.name, e.x, e.y, e.dir, false);
   setMode('place'); ugFlip = d.kind === 'ug' ? ugFlip : false; updateChip();
 }
 function toggleUg() {
@@ -1091,6 +1099,7 @@ function updateChip() {
     else if (d && d.kind === 'ins') bits.push(`deja los objetos hacia el ${DIRN[(Math.round(curDir / 2) + 4) % 8]} (R)`);
     else if (d && d.rot !== false) bits.push(`mirando al ${DIRN[Math.round(curDir / 2) % 8]} (R)`);
     if (ugt) bits.push((ugt === 'output' ? 'salida' : 'entrada') + ' (T)');
+    if (tool.extra && tool.extra.recipe) bits.push(`receta: ${BP.recipeName(tool.extra.recipe)}`);
     if (!(RP && railTool())) bits.push('Esc para soltar');
     $('#chip-keys').textContent = bits.join(', ');
     drawIcon($('#chip-cv'), tool.name, tool.tile, tool.tile ? 0 : (railTool() ? curDir % 8 : curDir), ugt, tmplV);
@@ -1127,7 +1136,7 @@ function buildPalette() {
 function palInfo(n, isT) {
   const d = isT ? TILES[n] : DEFS[n], bits = [];
   if (isT && d.sa) bits.push('requiere Space Age');
-  if (!isT) { bits.push(`${d.w}×${d.h}`); if (d.sa) bits.push('requiere Space Age'); if (d.cat === 'editor') bits.push('oculto en partidas normales: para el modo editor y mapas de pruebas'); if (d.elev) bits.push('solo empalma con otras vías elevadas; sube y baja con rampas'); if (d.kind === 'ins') bits.push('la flecha indica hacia dónde deja los objetos'); if (d.area) bits.push(`área ${d.area}×${d.area}`); const tip = { rail: 'clic en la flecha verde de una vía para planificar; en vacío pone una vía suelta', tmpl: 'se empalma sola con el final de una vía; R cambia la variante', railsig: 'se coloca y se orienta sola junto a una vía', trainstop: 'junto a una vía recta; se orienta sola', train: 'sobre una vía recta; se acopla a 7 casillas' }[d.kind]; if (tip) bits.push(tip); }
+  if (!isT) { bits.push(`${d.w}×${d.h}`); if (d.sa) bits.push('requiere Space Age'); const rl = BP.recipesFor(n); if (rl) bits.push(`${rl.length} recetas`); if (d.cat === 'editor') bits.push('oculto en partidas normales: para el modo editor y mapas de pruebas'); if (d.elev) bits.push('solo empalma con otras vías elevadas; sube y baja con rampas'); if (d.kind === 'ins') bits.push('la flecha indica hacia dónde deja los objetos'); if (d.area) bits.push(`área ${d.area}×${d.area}`); const tip = { rail: 'clic en la flecha verde de una vía para planificar; en vacío pone una vía suelta', tmpl: 'se empalma sola con el final de una vía; R cambia la variante', railsig: 'se coloca y se orienta sola junto a una vía', trainstop: 'junto a una vía recta; se orienta sola', train: 'sobre una vía recta; se acopla a 7 casillas' }[d.kind]; if (tip) bits.push(tip); }
   $('#pal-info').innerHTML = `<b>${esc(d.label)}</b><code>${esc(n)}</code>${bits.length ? `<div class="hint" style="margin:2px 0 0">${esc(bits.join(', '))}</div>` : ''}`;
 }
 $('#pal-q').addEventListener('input', e => {
@@ -1152,13 +1161,18 @@ function renderSel() {
       ${['rail', 'railsig', 'legacyrail'].includes(d.kind) ? '' : `<div class="field"><span>Dirección</span><div class="seg" id="sel-dir">${DIR4.map(([l, v]) => `<button data-d="${v}" ${e.dir === v ? 'class="on"' : ''} ${d.rot === false ? 'disabled' : ''} title="${({ N: 'Norte', E: 'Este', S: 'Sur', O: 'Oeste' })[l]}">${l}</button>`).join('')}</div></div>`}
       ${d.kind === 'ug' ? `<div class="field"><span>Tipo</span><div class="seg" id="sel-ug"><button data-t="input" ${ugType(e) === 'input' ? 'class="on"' : ''}>Entrada</button><button data-t="output" ${ugType(e) === 'output' ? 'class="on"' : ''}>Salida</button></div></div>` : ''}
       ${d.kind === 'trainstop' ? `<label class="field"><span>Nombre de la parada</span><input id="sel-station" value="${esc((e.extra && e.extra.station) || '')}" placeholder="Sin nombre" maxlength="200"></label>` : ''}
-      ${showRecipe ? `<label class="field"><span>Receta (nombre interno)</span><input id="sel-recipe" list="dl-recipes" value="${esc(e.extra.recipe || '')}" placeholder="p. ej. iron-gear-wheel" spellcheck="false"></label>` : ''}
+      ${showRecipe ? `<div class="field"><span>Receta</span><input id="sel-recipe" list="${recipeListId(e.name)}" value="${esc(e.extra.recipe || '')}" placeholder="Escribe para buscar, p. ej. engranaje" spellcheck="false" autocomplete="off" aria-describedby="sel-rhint"><div class="hint" id="sel-rhint" style="margin-top:3px"></div></div>` : ''}
       <details class="adv"><summary>Datos avanzados (JSON)</summary><textarea class="code small" id="sel-json" spellcheck="false">${esc(JSON.stringify(ex, null, 1))}</textarea><div class="row" style="margin-top:6px"><button class="btn small" id="sel-json-apply">Aplicar datos</button><span class="err" id="sel-json-err" style="font-size:13px"></span></div></details>
       <div class="row" style="margin-top:10px"><button class="btn small" id="sel-pick">Usar como herramienta</button><button class="btn small danger" id="sel-del">Borrar</button></div>`;
     body.querySelectorAll('#sel-dir button').forEach(b => b.onclick = () => { if (rotOne(e.id, false, +b.dataset.d)) renderSel(); });
     body.querySelectorAll('#sel-ug button').forEach(b => b.onclick = () => { act(() => setEnt(e.id, { extra: Object.assign({}, e.extra, { type: b.dataset.t }) })); renderSel(); });
     const si = $('#sel-station'); if (si) si.onchange = () => { const v = si.value.trim(), x = Object.assign({}, e.extra); if (v) x.station = v; else delete x.station; act(() => setEnt(e.id, { extra: x })); };
-    const ri = $('#sel-recipe'); if (ri) ri.onchange = () => { const v = ri.value.trim(); const x = Object.assign({}, e.extra); if (v) x.recipe = v; else delete x.recipe; act(() => setEnt(e.id, { extra: x })); };
+    const ri = $('#sel-recipe');
+    if (ri) {
+      const hint = () => recipeHint($('#sel-rhint'), [e.name], ri.value.trim());
+      hint(); ri.oninput = hint;
+      ri.onchange = () => { const v = ri.value.trim(); if (v && BP.canCraft(e.name, v) === false) { hint(); return; } const x = Object.assign({}, e.extra); if (v) x.recipe = v; else delete x.recipe; act(() => setEnt(e.id, { extra: x })); hint(); };
+    }
     $('#sel-json-apply').onclick = () => {
       try { const v = JSON.parse($('#sel-json').value || '{}'); if (!v || typeof v !== 'object' || Array.isArray(v)) throw new Error('Debe ser un objeto { … }');
         for (const k of ['entity_number', 'name', 'position', 'direction']) delete v[k];
@@ -1166,7 +1180,7 @@ function renderSel() {
         act(() => setEnt(e.id, { extra: v })); toast('Datos aplicados', 'ok'); }
       catch (err) { $('#sel-json-err').textContent = 'JSON no válido: ' + err.message; }
     };
-    $('#sel-pick').onclick = () => { tool = { name: e.name, tile: false }; curDir = e.dir; ugFlip = false; setMode('place'); };
+    $('#sel-pick').onclick = () => { tool = { name: e.name, tile: false, extra: recipeExtra(e) }; curDir = e.dir; ugFlip = false; setMode('place'); };
     $('#sel-del').onclick = deleteSel;
     body.insertAdjacentHTML('beforeend', repeatHtml()); bindRepeat();
     return;
@@ -1174,12 +1188,50 @@ function renderSel() {
   const counts = countBy([...sel].map(id => S.ents.get(id)).filter(Boolean));
   body.innerHTML = `<ul class="clist" style="margin:0 0 10px">${counts.slice(0, 8).map(([nm, c]) => `<li><span class="sw" style="background:${def(nm).color}"></span>${esc(def(nm).label)}<span class="n">${c}</span></li>`).join('')}</ul>
     <div class="row"><button class="btn small" id="ms-copy">Copiar como string</button><button class="btn small" id="ms-save" title="Guardarla en Mis planos para reutilizarla (Ctrl+B)">Guardar como fragmento</button><button class="btn small" id="ms-rot">Rotar</button><button class="btn small danger" id="ms-del">Borrar</button></div>
-    <p class="hint">Arrastra para moverla o usa las flechas. Ctrl+C también la copia como string.</p>${repeatHtml()}`;
-  $('#ms-save').onclick = () => openSave('sel'); bindRepeat();
+    <p class="hint">Arrastra para moverla o usa las flechas. Ctrl+C también la copia como string.</p>${recipeMultiHtml()}${repeatHtml()}`;
+  $('#ms-save').onclick = () => openSave('sel'); bindRepeat(); bindRecipeMulti();
   $('#ms-copy').onclick = async () => { const g = selGroup(); clip = g; const ok = await writeClip(groupString(g)); toast(ok ? copyMsg(false, g.ents.length) : 'El navegador bloqueó el portapapeles; prueba con Ctrl+C', ok ? 'ok' : 'warn'); };
   $('#ms-rot').onclick = () => rotateSel(false);
   $('#ms-del').onclick = deleteSel;
 }
+// ----- recetas: solo las que puede fabricar cada máquina (datos del juego) -----
+const recipeExtra = e => def(e.name).recipe && e.extra && typeof e.extra.recipe === 'string' ? { recipe: e.extra.recipe } : null;
+function recipeOptions(list) { return list.map(r => `<option value="${esc(r.name)}" label="${esc(r.label + (r.sa ? ' · Space Age' : ''))}"></option>`).join(''); }
+function recipeListId(machine) {
+  const id = 'dl-r-' + machine; if (document.getElementById(id)) return id;
+  const dl = document.createElement('datalist'); dl.id = id; dl.innerHTML = recipeOptions(BP.recipesFor(machine) || BP.RECIPES.map(([name, label]) => ({ name, label }))); document.body.appendChild(dl); return id;
+}
+// recetas que comparten todas las máquinas indicadas
+function commonRecipes(names) { const [a, ...rest] = names; return (BP.recipesFor(a) || []).filter(r => rest.every(n => BP.canCraft(n, r.name))); }
+function recipeHint(el, names, v) {
+  if (!el) return; el.classList.remove('err');
+  if (!v) { const n = commonRecipes(names).length; el.textContent = n ? `${n} recetas disponibles. Escribe parte del nombre en español o el nombre interno.` : 'Estas máquinas no comparten ninguna receta.'; return; }
+  const bad = names.filter(n => BP.canCraft(n, v) === false);
+  if (bad.length) { el.classList.add('err'); el.textContent = `${names.length > 1 ? `${bad.length} de las máquinas no pueden` : 'Esta máquina no puede'} fabricar «${BP.recipeName(v)}».`; return; }
+  el.textContent = names.some(n => BP.canCraft(n, v) === null) ? `«${v}» no está en los datos del juego (¿de un mod?). Se guardará tal cual.` : BP.recipeName(v);
+}
+function selMachines() { return [...sel].map(id => S.ents.get(id)).filter(e => e && def(e.name).recipe); }
+function recipeMultiHtml() {
+  const m = selMachines(); if (!m.length) return '';
+  const names = [...new Set(m.map(e => e.name))], cur = new Set(m.map(e => (e.extra && e.extra.recipe) || ''));
+  let dl = document.getElementById('dl-r-sel'); if (!dl) { dl = document.createElement('datalist'); dl.id = 'dl-r-sel'; document.body.appendChild(dl); }
+  dl.innerHTML = recipeOptions(commonRecipes(names));
+  return `<div class="field rep" style="display:block"><span>Receta para ${m.length} ${m.length === 1 ? 'máquina' : 'máquinas'}${names.length > 1 ? ` de ${names.length} tipos` : ''}</span>
+    <div class="row"><input class="inp" id="ms-recipe" list="dl-r-sel" value="${cur.size === 1 ? esc([...cur][0]) : ''}" placeholder="${cur.size > 1 ? 'Varias recetas' : 'Escribe para buscar'}" spellcheck="false" autocomplete="off" style="flex:1;width:auto"><button class="btn small" id="ms-rset">Asignar</button></div>
+    <div class="hint" id="ms-rhint" style="margin-top:3px"></div></div>`;
+}
+function bindRecipeMulti() {
+  const inp = $('#ms-recipe'); if (!inp) return;
+  const names = () => [...new Set(selMachines().map(e => e.name))], hint = () => recipeHint($('#ms-rhint'), names(), inp.value.trim());
+  hint(); inp.oninput = hint;
+  const apply = () => {
+    const v = inp.value.trim(), m = selMachines(); if (v && names().some(n => BP.canCraft(n, v) === false)) { hint(); return; }
+    act(() => { for (const e of m) { const x = Object.assign({}, e.extra); if (v) x.recipe = v; else delete x.recipe; setEnt(e.id, { extra: x }); } });
+    toast(v ? `«${BP.recipeName(v)}» asignada a ${m.length} máquinas` : `Receta quitada de ${m.length} máquinas`, 'ok');
+  };
+  $('#ms-rset').onclick = apply; inp.onkeydown = ev => { if (ev.key === 'Enter') { ev.preventDefault(); apply(); } };
+}
+
 // ----- repetir la selección (teselar columnas de hornos, filas de balizas, bloques…) -----
 const REPD = [['→', 1, 'derecha'], ['↓', 2, 'abajo'], ['←', 3, 'izquierda'], ['↑', 0, 'arriba']];
 let repDir = 1;
@@ -1539,7 +1591,6 @@ $('#e-example').onclick = loadExample;
 $('#b-side').onclick = () => $('#side').classList.toggle('open');
 $('#bp-target').onchange = e => { S.target = +e.target.value; renderBpSrc(); saveDraft(); };
 $('#bp-label').oninput = $('#bp-desc').oninput = () => { clearTimeout(saveT); saveT = setTimeout(saveDraft, 900); };
-$('#dl-recipes').innerHTML = BP.RECIPES.map(([v, l]) => `<option value="${esc(v)}">${esc(l)}</option>`).join('');
 document.addEventListener('pointerdown', e => { const sd = $('#side'); if (sd.classList.contains('open') && !sd.contains(e.target) && e.target !== $('#b-side')) sd.classList.remove('open'); });
 
 // ----- arranque -----
