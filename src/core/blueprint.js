@@ -5,7 +5,7 @@ const pako = { deflate, inflate };
 /* ===== Núcleo: definiciones, códec y conversión de planos (sin DOM) ===== */
 export const BP = (() => {
 const DEFS = {};
-const CATS = [['belts','Cintas'],['trains','Trenes'],['ins','Insertadores'],['store','Almacenaje'],['fluid','Fluidos'],['power','Energía'],['prod','Producción'],['logic','Robots y circuitos'],['def','Defensa'],['space','Espacio y carga'],['tiles','Suelos']];
+const CATS = [['belts','Cintas'],['trains','Trenes'],['ins','Insertadores'],['store','Almacenaje'],['fluid','Fluidos'],['power','Energía'],['prod','Producción'],['logic','Robots y circuitos'],['def','Defensa'],['space','Espacio y carga'],['editor','Ocultos y modo editor'],['tiles','Suelos']];
 function D(name, label, cat, w, h, kind, color, o) { DEFS[name] = Object.assign({ name, label, cat, w, h, kind, color, rot: true }, o || {}); }
 const Y = '#e3ad1a', R = '#dd4636', B = '#3a9be2', G = '#79c142';
 D('transport-belt','Cinta transportadora','belts',1,1,'belt',Y);
@@ -107,8 +107,6 @@ D('thruster','Propulsor','space',4,5,'machine','#8b6b4b',{g:'rocket',sa:1,rot:fa
 D('cargo-bay','Bahía de carga','space',4,4,'machine','#7a8590',{g:'tank',sa:1});
 D('landing-pad-unloading-bay','Bahía de descarga','space',4,4,'machine','#6f7c88',{g:'tank',sa:1});
 D('cargo-landing-pad','Plataforma de aterrizaje de carga','space',8,8,'machine','#5f6b75',{g:'rocket',sa:1,ab:'Plataforma de aterrizaje'});
-D('rail-ramp','Rampa de vía',null,4,16,'machine','#7a7166',{g:'dot',sa:1});
-D('rail-support','Soporte de vía',null,3,3,'machine','#7a7166',{g:'dot',sa:1});
 // trenes: vías de Factorio 2.0 (rejilla de 2×2, curvas A y B, media diagonal)
 D('straight-rail','Vía recta','trains',2,2,'rail','#8a7660',{g2:1,rt:'S'});
 D('rail-curve-90','Curva de 90°','trains',13,13,'tmpl','#8a7660',{tmpl:'c90'});
@@ -119,15 +117,26 @@ D('train-stop','Parada de tren','trains',2,2,'trainstop','#b8463c',{g2:1});
 D('locomotive','Locomotora','trains',2,6,'train','#b5453a',{g2:1,loco:1});
 D('cargo-wagon','Vagón de carga','trains',2,5,'train','#9a7a4c',{g2:1});
 D('fluid-wagon','Vagón cisterna','trains',2,5,'train','#5b7fa3',{g2:1,tank:1});
-D('artillery-wagon','Vagón de artillería',null,2,5,'train','#66734f',{g2:1});
+D('artillery-wagon','Vagón de artillería','trains',2,5,'train','#66734f',{g2:1});
 D('half-diagonal-rail','Vía en media diagonal',null,2,2,'rail','#8a7660',{g2:1,rt:'H'});
 D('curved-rail-a','Curva de vía (A)',null,2,2,'rail','#8a7660',{g2:1,rt:'A'});
 D('curved-rail-b','Curva de vía (B)',null,2,2,'rail','#8a7660',{g2:1,rt:'B'});
-for (const t of ['straight-rail', 'half-diagonal-rail', 'curved-rail-a', 'curved-rail-b']) D('elevated-' + t, DEFS[t].label + ' elevada', null, 2, 2, 'rail', '#9c8d7a', { g2: 1, rt: DEFS[t].rt, elev: 1 });
+for (const t of ['straight-rail', 'half-diagonal-rail', 'curved-rail-a', 'curved-rail-b']) D('elevated-' + t, DEFS[t].label + ' elevada', t === 'straight-rail' ? 'trains' : null, 2, 2, 'rail', '#9c8d7a', { g2: 1, rt: DEFS[t].rt, elev: 1, sa: 1 });
+D('rail-ramp','Rampa de vía','trains',4,16,'machine','#7a7166',{g:'rocket',sa:1,g2:1});
+D('rail-support','Soporte de vía','trains',3,3,'machine','#7a7166',{g:'tower',sa:1,g2:1});
 D('legacy-straight-rail','Vía recta de 1.1',null,2,2,'legacyrail','#6b6b6b',{g2:1});
 D('legacy-curved-rail','Curva de vía de 1.1',null,4,4,'legacyrail','#6b6b6b',{g2:1});
-D('loader','Cargador',null,1,2,'machine',Y);
-D('linked-belt','Cinta enlazada',null,1,1,'belt','#8a8a8a');
+// ocultos en el juego normal, pero válidos en planos (modo editor, mapas de pruebas y bancos de rendimiento de megabases)
+D('loader','Cargador','editor',1,2,'machine',Y,{g:'gear'});
+D('fast-loader','Cargador rápido','editor',1,2,'machine',R,{g:'gear'});
+D('express-loader','Cargador exprés','editor',1,2,'machine',B,{g:'gear'});
+D('turbo-loader','Cargador turbo','editor',1,2,'machine',G,{g:'gear',sa:1});
+D('linked-belt','Cinta enlazada','editor',1,1,'belt','#8a8a8a');
+D('infinity-chest','Cofre infinito','editor',1,1,'chest','#c552b8',{rot:false});
+D('linked-chest','Cofre enlazado','editor',1,1,'chest','#5aa0a0',{rot:false});
+D('infinity-pipe','Tubería infinita','editor',1,1,'pipe','#c552b8',{rot:false,fluid:1});
+D('heat-interface','Interfaz de calor','editor',1,1,'machine','#c95f3a',{rot:false,g:'flame',heat:1});
+D('electric-energy-interface','Interfaz de energía eléctrica','editor',2,2,'machine','#6f5aa5',{rot:false,g:'bolt',ab:'Energía infinita'});
 
 const TILES = {
   'stone-path': { label: 'Camino de piedra', color: '#8a7c63', item: 'stone-brick' },
@@ -136,6 +145,13 @@ const TILES = {
   'refined-concrete': { label: 'Hormigón refinado', color: '#5b6670', item: 'refined-concrete' },
   'refined-hazard-concrete-left': { label: 'Hormigón refinado de peligro', color: '#bf8a2a', item: 'refined-hazard-concrete', hz: 1 },
   'landfill': { label: 'Relleno', color: '#6f5c3c', item: 'landfill' },
+  'foundation': { label: 'Cimentación', color: '#4f5458', item: 'foundation', sa: 1 },
+  'space-platform-foundation': { label: 'Cimentación de plataforma espacial', color: '#5c6670', item: 'space-platform-foundation', sa: 1 },
+  'ice-platform': { label: 'Plataforma de hielo', color: '#9fc7d8', item: 'ice-platform', sa: 1 },
+  'artificial-yumako-soil': { label: 'Suelo artificial de yumako', color: '#8c4a5e', item: 'artificial-yumako-soil', sa: 1 },
+  'overgrowth-yumako-soil': { label: 'Suelo frondoso de yumako', color: '#a3566c', item: 'overgrowth-yumako-soil', sa: 1 },
+  'artificial-jellynut-soil': { label: 'Suelo artificial de gelinuez', color: '#7a5aa0', item: 'artificial-jellynut-soil', sa: 1 },
+  'overgrowth-jellynut-soil': { label: 'Suelo frondoso de gelinuez', color: '#8c68b8', item: 'overgrowth-jellynut-soil', sa: 1 },
 };
 function tileDef(n) {
   if (TILES[n]) return TILES[n];
@@ -279,6 +295,45 @@ function flattenBook(book, prefix, out) {
 }
 
 // ----- exportar -----
+// plano decodificado ({ blueprint }) llevado al esquema T (1 = 1.1, 2 = 2.0); si ya lo es, se devuelve tal cual
+function convertBlueprint(obj, T) {
+  T = T === 1 ? 1 : 2;
+  if (!obj || !obj.blueprint) return obj;
+  const p = parseBlueprint(obj.blueprint);
+  if (p.meta.scheme === T) return obj;
+  return buildBlueprint({ ents: p.ents.map(e => Object.assign({ id: e.num }, e)), wires: p.wires, tiles: p.tiles, meta: p.meta, target: T });
+}
+// libro de planos con hijos { blueprint } o { blueprint_book }; los planos de otro esquema se convierten a T
+function buildBook(label, children, target, description) {
+  const T = target === 1 ? 1 : 2, book = { item: 'blueprint-book' };
+  if (label) book.label = label;
+  if (description) book.description = description;
+  book.blueprints = (children || []).filter(c => c && (c.blueprint || c.blueprint_book))
+    .map((c, i) => Object.assign({ index: i }, c.blueprint ? convertBlueprint({ blueprint: c.blueprint }, T) : { blueprint_book: c.blueprint_book }));
+  book.active_index = 0;
+  book.version = VDEF[T];
+  return { blueprint_book: book };
+}
+// cuadrícula de ajuste del plano (snap-to-grid): { w, h, abs, ox, oy } o null
+function getSnap(extraBp) {
+  const g = extraBp && extraBp['snap-to-grid'];
+  if (!g || !(g.x > 0) || !(g.y > 0)) return null;
+  const r = extraBp['position-relative-to-grid'] || {};
+  return { w: g.x | 0, h: g.y | 0, abs: !!extraBp['absolute-snapping'], ox: r.x | 0, oy: r.y | 0 };
+}
+function setSnap(extraBp, snap) {
+  const x = Object.assign({}, extraBp || {});
+  delete x['snap-to-grid']; delete x['absolute-snapping']; delete x['position-relative-to-grid'];
+  if (snap && snap.w > 0 && snap.h > 0) {
+    x['snap-to-grid'] = { x: Math.min(10000, snap.w | 0), y: Math.min(10000, snap.h | 0) };
+    if (snap.abs) {
+      x['absolute-snapping'] = true;
+      const ox = ((snap.ox | 0) % snap.w + snap.w) % snap.w, oy = ((snap.oy | 0) % snap.h + snap.h) % snap.h;
+      if (ox || oy) x['position-relative-to-grid'] = { x: ox, y: oy };
+    }
+  }
+  return x;
+}
 function modInv(name) { const d = DEFS[name]; if (d && d.kind === 'drill') return 2; if (name === 'lab' || name === 'biolab') return 3; if (name === 'beacon') return 1; return 4; }
 function items1to2(items, ename) {
   if (!items || Array.isArray(items) || typeof items !== 'object') return items;
@@ -384,7 +439,7 @@ const PORTCOND = new Set(["assembling-machine-2", "assembling-machine-3", "big-m
 function recipeName(r) { return RECIPE_ES[r] || String(r).replace(/-/g, ' '); }
 
 return { PORTS, PORTCOND, DEFS, CATS, TILES, RECIPES, N1TO2, N2TO1, def, sz, tileDef, encVer, decVer, verStr, VDEF, hasPako, encode, encodeSync, decode, looksLikeString,
-  parseBlueprint, buildBlueprint, flattenBook, mapSched, mapStock, recipeName };
+  parseBlueprint, buildBlueprint, flattenBook, convertBlueprint, buildBook, getSnap, setSnap, mapSched, mapStock, recipeName };
 })();
 
 export default BP;

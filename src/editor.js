@@ -512,6 +512,11 @@ function draw() {
     c.beginPath(); for (let x = Math.floor(wx0 / 32) * 32; x <= wx1; x += 32) { const X = Math.round(SX(x)) + .5; c.moveTo(X, 0); c.lineTo(X, CH); } for (let y = Math.floor(wy0 / 32) * 32; y <= wy1; y += 32) { const Yy = Math.round(SY(y)) + .5; c.moveTo(0, Yy); c.lineTo(CW, Yy); } c.strokeStyle = TH.chunk; c.lineWidth = 1; c.stroke();
     c.beginPath(); const X0 = Math.round(SX(0)) + .5, Y0 = Math.round(SY(0)) + .5; c.moveTo(X0, 0); c.lineTo(X0, CH); c.moveTo(0, Y0); c.lineTo(CW, Y0); c.strokeStyle = TH.axis; c.stroke();
   }
+  const sn = BP.getSnap(S.meta.extraBp);   // cuadrícula de ajuste del plano (bloques de megabase)
+  if (sn && sn.w * s >= 6 && sn.h * s >= 6) {
+    c.beginPath(); for (let x = Math.floor(wx0 / sn.w) * sn.w; x <= wx1; x += sn.w) { const X = Math.round(SX(x)) + .5; c.moveTo(X, 0); c.lineTo(X, CH); } for (let y = Math.floor(wy0 / sn.h) * sn.h; y <= wy1; y += sn.h) { const Yy = Math.round(SY(y)) + .5; c.moveTo(0, Yy); c.lineTo(CW, Yy); }
+    c.save(); c.strokeStyle = TH.acc; c.globalAlpha = sn.abs ? .8 : .45; c.lineWidth = 1.5; c.setLineDash([10, 6]); c.stroke(); c.restore();
+  }
   if (showAreas) for (const e of S.ents.values()) { const d = def(e.name); if (d.area) drawArea(c, e, d, .05); }
   const moving = P && P.kind === 'move' && (P.dx || P.dy) ? P.ids : null;
   const RV = [];
@@ -545,12 +550,12 @@ function draw() {
   if (hv && mode === 'place' && tool) {
     if (tool.tile) { c.globalAlpha = .65; drawTile(c, tool.name, SX(hover.tx), SY(hover.ty), s); c.globalAlpha = 1; c.strokeStyle = TH.acc; c.lineWidth = 1.5; c.strokeRect(SX(hover.tx) + .5, SY(hover.ty) + .5, s - 1, s - 1); }
     else {
-      const gl = RP && tool.name === 'straight-rail' ? { ents: RP.plan || [], bad: false, pt: RP.goalPt, arrow: RP.from } : ghostList(), bad = gl.bad;
+      const gl = RP && railTool() ? { ents: RP.plan || [], bad: false, pt: RP.goalPt, arrow: RP.from } : ghostList(), bad = gl.bad;
       c.globalAlpha = .62;
       for (const g of gl.ents) { const b = bb(g); drawEnt(c, g, SX(b.x), SY(b.y), b.w * s, b.h * s, s, def(g.name).kind === 'belt' ? {} : null); }
       c.globalAlpha = 1;
       for (const g of gl.ents) { const d = def(g.name); if (d.area) drawArea(c, g, d, .1); if (d.kind !== 'rail' || bad) outline(c, bb(g), bad ? '#e5484d' : TH.acc, 1.5, bad ? 'rgba(229,72,77,.3)' : null); }
-      if (RP && tool.name === 'straight-rail') { c.strokeStyle = 'rgba(70,150,255,.38)'; c.lineWidth = Math.max(3, 1.5 * s); c.lineCap = 'round'; for (const g of gl.ents) { const rp = railPath(g); if (!rp) continue; c.beginPath(); rp.pts.forEach(([x, y], i) => i ? c.lineTo(SX(x), SY(y)) : c.moveTo(SX(x), SY(y))); c.stroke(); } }   // trazado previsto en azul, como los fantasmas del juego
+      if (RP && railTool()) { c.strokeStyle = 'rgba(70,150,255,.38)'; c.lineWidth = Math.max(3, 1.5 * s); c.lineCap = 'round'; for (const g of gl.ents) { const rp = railPath(g); if (!rp) continue; c.beginPath(); rp.pts.forEach(([x, y], i) => i ? c.lineTo(SX(x), SY(y)) : c.moveTo(SX(x), SY(y))); c.stroke(); } }   // trazado previsto en azul, como los fantasmas del juego
       if (gl.arrow) drawRailArrow(c, gl.arrow, s);
       for (const q of [gl.pt, gl.pt0]) if (q) { c.strokeStyle = TH.acc; c.lineWidth = 2.5; c.beginPath(); c.arc(SX(q[0]), SY(q[1]), Math.max(6, s * .5), 0, 7); c.stroke(); }
     }
@@ -611,18 +616,24 @@ function holdGroup(g, msg) {
 // ----- trazos -----
 // ---------- herramientas de trenes ----------
 let tmplV = 0, emptyHint = false, RP = null;   // RP: planificación de vías en curso
-function railEndsAll() {
-  ix(); if (RE) return RE;
+// vías a ras de suelo y elevadas (Space Age): cada nivel solo empalma consigo mismo
+const RAIL_TOOLS = new Set(['straight-rail', 'elevated-straight-rail']);
+const railTool = () => !!tool && RAIL_TOOLS.has(tool.name);
+const elevOf = name => def(name).elev ? 1 : 0;
+const toLayer = (name, elev) => elev ? (name.startsWith('elevated-') ? name : 'elevated-' + name) : name.replace(/^elevated-/, '');
+const railLayer = () => tool ? elevOf(tool.name) : 0;
+function railEndsAll(layer) {
+  ix(); RE = RE || {}; const ck = layer == null ? 'all' : layer; if (RE[ck]) return RE[ck];
   const m = new Map();
-  for (const e of S.ents.values()) { if (def(e.name).kind !== 'rail') continue; const E = railEndsOf(e.name, e.x, e.y, e.dir); if (!E) continue; for (const [x, y, h] of E) { const k = K(x, y), a = m.get(k); if (a) a.push(h); else m.set(k, [h]); } }
+  for (const e of S.ents.values()) { if (def(e.name).kind !== 'rail' || (layer != null && elevOf(e.name) !== layer)) continue; const E = railEndsOf(e.name, e.x, e.y, e.dir); if (!E) continue; for (const [x, y, h] of E) { const k = K(x, y), a = m.get(k); if (a) a.push(h); else m.set(k, [h]); } }
   const free = [];
   for (const [k, hs] of m) { const [x, y] = k.split(',').map(Number); for (const h of hs) if (!hs.includes((h + 8) % 16)) free.push([x, y, h]); }
-  return RE = { m, free, slots: null };
+  return RE[ck] = { m, free, slots: null };
 }
 // imán: si hay un final de vía libre cerca con el rumbo opuesto a un extremo de la plantilla, la plantilla se empalma ahí
 function tmplAnchor(k, v) {
   const ends = tmplEnds(k, v), q = tmplMQ(k, v)[1]; let best = null, bd = 3.2 * 3.2;
-  for (const [fx, fy, fh] of railEndsAll().free) {
+  for (const [fx, fy, fh] of railEndsAll(0).free) {
     const dd = (fx - hover.wx) ** 2 + (fy - hover.wy) ** 2; if (dd > bd) continue;
     for (const [tx, ty, th] of ends) if ((th + 8) % 16 === fh) { bd = dd; best = { x: fx - tx, y: fy - ty, pt: [fx, fy] }; }
   }
@@ -657,9 +668,9 @@ function railCell(wx, wy, diag) { return diag ? [2 * Math.round(wx / 2), 2 * Mat
 function placeRail(name, x, y, dir) { ix(); const id = railIdx.get(railKey(name, x, y, dir)); if (id != null) return { id, made: false }; return { id: addEnt({ name, x, y, dir: normDir(name, dir), xs: 2, extra: {} }), made: true }; }
 function ghostList() {
   const d = def(tool.name), mk = (name, x, y, dir) => ({ name, x, y, dir, extra: {} });
-  if (tool.name === 'straight-rail') {
+  if (railTool()) {
     const a = railArrowAt(); if (a) return { ents: [], bad: false, arrow: a };   // sobre una vía: flecha verde para planificar desde ahí
-    const [x, y] = railCell(hover.wx, hover.wy, curDir % 4 === 2); return { ents: [mk('straight-rail', x, y, curDir % 8)], bad: false };
+    const [x, y] = railCell(hover.wx, hover.wy, curDir % 4 === 2); return { ents: [mk(tool.name, x, y, curDir % 8)], bad: false };
   }
   if (d.tmpl) { const a = tmplAnchor(d.tmpl, tmplV); return { ents: tmplPieces(d.tmpl, tmplV, a.x, a.y), bad: false, pt: a.pt }; }
   if (d.kind === 'railsig') {
@@ -683,9 +694,10 @@ function freeEndNear(x, y, r, skip) {
 // planificar, el trazado sigue al cursor sin mantener el botón y cada clic lo coloca y sigue desde su final. Esc, Q o clic derecho terminan.
 function railArrowAt() {
   ix(); let best = null, bs = Infinity;
-  for (const [fx, fy, fh] of railEndsAll().free) { const s = Math.hypot(fx - hover.wx, fy - hover.wy); if (s < 1.2 && s < bs) { bs = s; best = [fx, fy, fh]; } }
+  const L = railLayer();
+  for (const [fx, fy, fh] of railEndsAll(L).free) { const s = Math.hypot(fx - hover.wx, fy - hover.wy); if (s < 1.2 && s < bs) { bs = s; best = [fx, fy, fh]; } }
   for (const id of occR.get(K(hover.tx, hover.ty)) || []) {   // cualquier vía bajo el cursor, aunque esté conectada: así se hacen desvíos
-    const e = S.ents.get(id), E = e && railEndsOf(e.name, e.x, e.y, e.dir); if (!E) continue;
+    const e = S.ents.get(id), E = e && elevOf(e.name) === L && railEndsOf(e.name, e.x, e.y, e.dir); if (!E) continue;
     for (const [x, y, h] of E) { const s = Math.hypot(x - hover.wx, y - hover.wy) + 0.3 * Math.hypot(e.x - hover.wx, e.y - hover.wy); if (s < bs) { bs = s; best = [x, y, h]; } }
   }
   return best;
@@ -693,7 +705,7 @@ function railArrowAt() {
 // punto de conexión de una vía existente junto al cursor, libre o no: el trazado acaba empalmando o haciendo un desvío
 function railGoalNear(x, y, from) {
   let best = null, bd = 2.2 * 2.2;
-  for (const [k, hs] of railEndsAll().m) {
+  for (const [k, hs] of railEndsAll(railLayer()).m) {
     const [px, py] = k.split(',').map(Number); if (Math.hypot(px - from[0], py - from[1]) < 4) continue;
     const d2 = (px - x) ** 2 + (py - y) ** 2; if (d2 < bd) { bd = d2; best = { x: px, y: py, hs: [...new Set(hs)].map(h => (h + 8) % 16) }; }
   }
@@ -705,6 +717,7 @@ function railPlanUpdate(force) {
   let path = g ? planRails([RP.from], { x: g.x, y: g.y, hs: g.hs }) : null;
   RP.goalPt = path ? [g.x, g.y] : null;
   if (!path && Math.hypot(hover.wx - RP.from[0], hover.wy - RP.from[1]) > 1.2) path = planRails([RP.from], { x: hover.wx, y: hover.wy, r: 1.5 });
+  const L = railLayer(); if (path) for (const g of path) g.name = toLayer(g.name, L);
   RP.plan = path || []; updateChip(); dirty = true;
 }
 function railClick() {
@@ -715,13 +728,13 @@ function railClick() {
   }
   const a = railArrowAt();
   if (a) { RP = { from: a, tk: null, plan: [] }; railPlanUpdate(true); return; }
-  const [x, y] = railCell(hover.wx, hover.wy, curDir % 4 === 2); placeRail('straight-rail', x, y, curDir % 8);   // en vacío: una vía suelta
+  const [x, y] = railCell(hover.wx, hover.wy, curDir % 4 === 2); placeRail(tool.name, x, y, curDir % 8);   // en vacío: una vía suelta
 }
 function startPlace() {
   txBegin(); P = { kind: 'place', tx: hover.tx, ty: hover.ty, last: null };
   if (tool.tile) return setTile(hover.tx, hover.ty, tool.name);
   const d = def(tool.name);
-  if (tool.name === 'straight-rail') { P.noDrag = true; railClick(); return; }
+  if (railTool()) { P.noDrag = true; railClick(); return; }
   if (d.tmpl || d.kind === 'railsig' || d.kind === 'trainstop' || d.kind === 'train') {
     P.noDrag = true; const gl = ghostList();
     if (gl.bad) return toast(gl.why || 'No cabe ahí', 'warn');
@@ -817,7 +830,7 @@ function doRotate(ccw) {
     if (d.tmpl) { const n = tmplVariants(d.tmpl); tmplV = (tmplV + (ccw ? n - 1 : 1)) % n; updateChip(); dirty = true; return; }
     if (d.kind === 'railsig') return toast('Las señales se orientan solas según el lado de la vía');
     if (d.rot === false) return toast(`${d.label} no se puede rotar`, 'warn');
-    curDir = tool.name === 'straight-rail' ? (curDir % 8 + (ccw ? 6 : 2)) % 8 : (curDir + (ccw ? 12 : 4)) % 16;
+    curDir = railTool() ? (curDir % 8 + (ccw ? 6 : 2)) % 8 : (curDir + (ccw ? 12 : 4)) % 16;
     updateChip(); dirty = true; return;
   }
   if (mode === 'hold' && held) return rotateHeld(ccw);
@@ -830,7 +843,7 @@ function pipette() {
   const e = hover.inside ? entAtTile(hover.tx, hover.ty) : null;
   if (!e) { if (mode !== 'select') setMode('select'); return; }
   const d = def(e.name);
-  if (d.kind === 'rail' && e.name !== 'straight-rail') return toast('Para curvas usa «Curva de 90°» o «Curva de 45°» de la paleta', 'warn');
+  if (d.kind === 'rail' && !RAIL_TOOLS.has(e.name)) return toast('Para curvas usa «Curva de 90°» o «Curva de 45°» de la paleta', 'warn');
   if (!d.cat) return toast('Esa entidad no está en la paleta', 'warn');
   tool = { name: e.name, tile: false }; curDir = e.dir; ugFlip = d.kind === 'ug' && ugType(e) !== autoUg(e.name, e.x, e.y, e.dir, false);
   setMode('place'); ugFlip = d.kind === 'ug' ? ugFlip : false; updateChip();
@@ -930,7 +943,7 @@ function setHover(px, py) {
   const [wx, wy] = s2w(px, py), otx = hover.tx, oty = hover.ty;
   hover.wx = wx; hover.wy = wy; hover.tx = Math.floor(wx); hover.ty = Math.floor(wy); hover.inside = true;
   if ((otx !== hover.tx || oty !== hover.ty) && mode === 'place' && tool && !tool.tile && def(tool.name).kind === 'ug') updateChip();
-  if (RP && mode === 'place' && tool && tool.name === 'straight-rail') railPlanUpdate();
+  if (RP && mode === 'place' && railTool()) railPlanUpdate();
   updateStatus();
 }
 let spaceDown = false;
@@ -1025,6 +1038,8 @@ window.addEventListener('keydown', e => {
     else if (k === 'y' || (k === 'z' && e.shiftKey)) { e.preventDefault(); redo(); }
     else if (k === 'a') { e.preventDefault(); setMode('select'); S.ents.forEach((_, id) => sel.add(id)); S.tiles.forEach((_, kk) => selT.add(kk)); renderSel(); dirty = true; }
     else if (k === 's') { e.preventDefault(); copyAll(); }
+    else if (k === 'b') { e.preventDefault(); openSave('sel'); }
+    else if (k === 'd') { e.preventDefault(); if (sel.size || selT.size) repeatSel(1, 1, 0); else toast('Selecciona algo para repetirlo'); }
     return;
   }
   if (e.key === ' ') { e.preventDefault(); if (!spaceDown) { spaceDown = true; cv.className = 'c-pan'; } return; }
@@ -1069,16 +1084,16 @@ function updateChip() {
     const d = tool.tile ? null : def(tool.name), bits = [];
     const ugt = d && d.kind === 'ug' ? ghostEnt().extra.type : null;
     if (d && d.tmpl) bits.push(`variante ${tmplV + 1} de ${tmplVariants(d.tmpl)} (R)`, 'acércala al final de una vía y se empalma sola');
-    else if (d && tool.name === 'straight-rail') bits.push(...(RP ? [`${RP.plan.length} piezas: clic para colocarlas y seguir`, 'Esc, Q o clic derecho terminan'] : [`${RAILDIR[curDir % 8]} (R gira 45°)`, 'clic en la flecha verde de una vía para planificar desde ahí']));
+    else if (d && railTool()) bits.push(...(RP ? [`${RP.plan.length} piezas: clic para colocarlas y seguir`, 'Esc, Q o clic derecho terminan'] : [`${RAILDIR[curDir % 8]} (R gira 45°)`, 'clic en la flecha verde de una vía para planificar desde ahí']));
     else if (d && d.kind === 'railsig') bits.push('acércala a una vía: se coloca y se orienta sola');
     else if (d && d.kind === 'trainstop') bits.push('junto a una vía recta: se orienta sola');
     else if (d && d.kind === 'train') bits.push(`mirando al ${DIRN[Math.round((curDir % 4 === 0 ? curDir : 0) / 2) % 8]} (R)`, 'sobre una vía recta; se acopla a 7 casillas de otro vagón');
     else if (d && d.kind === 'ins') bits.push(`deja los objetos hacia el ${DIRN[(Math.round(curDir / 2) + 4) % 8]} (R)`);
     else if (d && d.rot !== false) bits.push(`mirando al ${DIRN[Math.round(curDir / 2) % 8]} (R)`);
     if (ugt) bits.push((ugt === 'output' ? 'salida' : 'entrada') + ' (T)');
-    if (!(RP && tool.name === 'straight-rail')) bits.push('Esc para soltar');
+    if (!(RP && railTool())) bits.push('Esc para soltar');
     $('#chip-keys').textContent = bits.join(', ');
-    drawIcon($('#chip-cv'), tool.name, tool.tile, tool.tile ? 0 : (tool.name === 'straight-rail' ? curDir % 8 : curDir), ugt, tmplV);
+    drawIcon($('#chip-cv'), tool.name, tool.tile, tool.tile ? 0 : (railTool() ? curDir % 8 : curDir), ugt, tmplV);
   } else if (mode === 'hold' && held) {
     chip.hidden = false; $('#chip-name').textContent = `Pegando ${held.ents.length} entidades`; $('#chip-keys').textContent = 'clic para colocar, Mayús+clic reemplaza, R gira, Esc suelta';
     const c = $('#chip-cv').getContext('2d'); c.clearRect(0, 0, 68, 68); glyphChip(c);
@@ -1101,7 +1116,7 @@ function buildPalette() {
       const isT = cat === 'tiles', lab = isT ? TILES[n].label : DEFS[n].label;
       const b = document.createElement('button'); b.className = 'slot'; b.dataset.name = n; b.dataset.q = norm(lab + ' ' + n); b.title = lab; b.setAttribute('aria-label', lab);
       const c = document.createElement('canvas'); c.width = c.height = Math.round(34 * dpr); b.appendChild(c);
-      if (!isT && DEFS[n].sa) { const t = document.createElement('span'); t.className = 'sa'; t.textContent = 'SA'; b.appendChild(t); }
+      if ((isT ? TILES[n] : DEFS[n]).sa) { const t = document.createElement('span'); t.className = 'sa'; t.textContent = 'SA'; b.appendChild(t); }
       b.addEventListener('click', () => { pickTool(n, isT); cv.focus({ preventScroll: true }); });
       b.addEventListener('mouseenter', () => palInfo(n, isT)); b.addEventListener('focus', () => palInfo(n, isT));
       grid.appendChild(b); requestAnimationFrame(() => drawIcon(c, n, isT));
@@ -1111,7 +1126,8 @@ function buildPalette() {
 }
 function palInfo(n, isT) {
   const d = isT ? TILES[n] : DEFS[n], bits = [];
-  if (!isT) { bits.push(`${d.w}×${d.h}`); if (d.sa) bits.push('requiere Space Age'); if (d.kind === 'ins') bits.push('la flecha indica hacia dónde deja los objetos'); if (d.area) bits.push(`área ${d.area}×${d.area}`); const tip = { rail: 'clic en la flecha verde de una vía para planificar; en vacío pone una vía suelta', tmpl: 'se empalma sola con el final de una vía; R cambia la variante', railsig: 'se coloca y se orienta sola junto a una vía', trainstop: 'junto a una vía recta; se orienta sola', train: 'sobre una vía recta; se acopla a 7 casillas' }[d.kind]; if (tip) bits.push(tip); }
+  if (isT && d.sa) bits.push('requiere Space Age');
+  if (!isT) { bits.push(`${d.w}×${d.h}`); if (d.sa) bits.push('requiere Space Age'); if (d.cat === 'editor') bits.push('oculto en partidas normales: para el modo editor y mapas de pruebas'); if (d.elev) bits.push('solo empalma con otras vías elevadas; sube y baja con rampas'); if (d.kind === 'ins') bits.push('la flecha indica hacia dónde deja los objetos'); if (d.area) bits.push(`área ${d.area}×${d.area}`); const tip = { rail: 'clic en la flecha verde de una vía para planificar; en vacío pone una vía suelta', tmpl: 'se empalma sola con el final de una vía; R cambia la variante', railsig: 'se coloca y se orienta sola junto a una vía', trainstop: 'junto a una vía recta; se orienta sola', train: 'sobre una vía recta; se acopla a 7 casillas' }[d.kind]; if (tip) bits.push(tip); }
   $('#pal-info').innerHTML = `<b>${esc(d.label)}</b><code>${esc(n)}</code>${bits.length ? `<div class="hint" style="margin:2px 0 0">${esc(bits.join(', '))}</div>` : ''}`;
 }
 $('#pal-q').addEventListener('input', e => {
@@ -1123,6 +1139,7 @@ $('#pal-q').addEventListener('input', e => {
 const DIR4 = [['N', 0], ['E', 4], ['S', 8], ['O', 12]];
 function renderSel() {
   const body = $('#sel-body'), n = sel.size, nt = selT.size;
+  $('#lib-save-sel').disabled = !n && !nt;
   $('#sel-count').textContent = n || nt ? `${n} entidades${nt ? `, ${nt} casillas de suelo` : ''}` : '';
   if (!n && !nt) { body.innerHTML = `<p class="hint" style="margin:0">Haz clic en una entidad para ver y cambiar sus datos. Arrastra sobre una zona vacía para seleccionar varias.</p>`; return; }
   if (n === 1 && !nt) {
@@ -1151,20 +1168,58 @@ function renderSel() {
     };
     $('#sel-pick').onclick = () => { tool = { name: e.name, tile: false }; curDir = e.dir; ugFlip = false; setMode('place'); };
     $('#sel-del').onclick = deleteSel;
+    body.insertAdjacentHTML('beforeend', repeatHtml()); bindRepeat();
     return;
   }
   const counts = countBy([...sel].map(id => S.ents.get(id)).filter(Boolean));
   body.innerHTML = `<ul class="clist" style="margin:0 0 10px">${counts.slice(0, 8).map(([nm, c]) => `<li><span class="sw" style="background:${def(nm).color}"></span>${esc(def(nm).label)}<span class="n">${c}</span></li>`).join('')}</ul>
-    <div class="row"><button class="btn small" id="ms-copy">Copiar como string</button><button class="btn small" id="ms-rot">Rotar</button><button class="btn small danger" id="ms-del">Borrar</button></div>
-    <p class="hint">Arrastra para moverla o usa las flechas. Ctrl+C también la copia como string.</p>`;
+    <div class="row"><button class="btn small" id="ms-copy">Copiar como string</button><button class="btn small" id="ms-save" title="Guardarla en Mis planos para reutilizarla (Ctrl+B)">Guardar como fragmento</button><button class="btn small" id="ms-rot">Rotar</button><button class="btn small danger" id="ms-del">Borrar</button></div>
+    <p class="hint">Arrastra para moverla o usa las flechas. Ctrl+C también la copia como string.</p>${repeatHtml()}`;
+  $('#ms-save').onclick = () => openSave('sel'); bindRepeat();
   $('#ms-copy').onclick = async () => { const g = selGroup(); clip = g; const ok = await writeClip(groupString(g)); toast(ok ? copyMsg(false, g.ents.length) : 'El navegador bloqueó el portapapeles; prueba con Ctrl+C', ok ? 'ok' : 'warn'); };
   $('#ms-rot').onclick = () => rotateSel(false);
   $('#ms-del').onclick = deleteSel;
 }
+// ----- repetir la selección (teselar columnas de hornos, filas de balizas, bloques…) -----
+const REPD = [['→', 1, 'derecha'], ['↓', 2, 'abajo'], ['←', 3, 'izquierda'], ['↑', 0, 'arriba']];
+let repDir = 1;
+function repeatHtml() {
+  return `<div class="rep"><span>Repetir</span><div class="row"><input class="inp num" id="rp-n" type="number" min="1" max="200" value="${LS.get('bpr.repN', 3)}" aria-label="Número de copias"><span>copias</span><div class="seg" id="rp-d">${REPD.map(([l, d, t]) => `<button data-d="${d}" ${d === repDir ? 'class="on"' : ''} title="Hacia ${t}" aria-label="Hacia ${t}">${l}</button>`).join('')}</div></div>
+    <span>Separación</span><div class="row"><input class="inp num" id="rp-gap" type="number" min="0" max="500" value="${LS.get('bpr.repGap', 0)}" aria-label="Casillas libres entre copias"><span>casillas</span><button class="btn small" id="rp-go">Repetir</button></div></div>`;
+}
+function bindRepeat() {
+  document.querySelectorAll('#rp-d button').forEach(b => b.onclick = () => { repDir = +b.dataset.d; document.querySelectorAll('#rp-d button').forEach(x => x.classList.toggle('on', x === b)); });
+  $('#rp-go').onclick = () => { const n = clamp(Math.round(+$('#rp-n').value) || 1, 1, 200), gap = clamp(Math.round(+$('#rp-gap').value) || 0, 0, 500); LS.set('bpr.repN', n); LS.set('bpr.repGap', gap); repeatSel(n, repDir, gap); };
+}
+// n copias pegadas a la selección hacia dir (0 = arriba, 1 = derecha, 2 = abajo, 3 = izquierda), con gap casillas libres entre ellas
+function repeatSel(n, dir, gap) {
+  if (!sel.size && !selT.size) return;
+  const g = selGroup(), b = tileBox(g), v = DV[dir], rails = g.ents.some(e => def(e.name).g2);
+  let step = (v[0] ? b.x1 - b.x0 : b.y1 - b.y0) + gap; if (rails && step % 2) step++;   // las vías van en una rejilla de 2×2
+  if (g.ents.length * n > 50000) return toast('Son demasiadas entidades de una vez; repite en varias tandas', 'warn');
+  let bad = 0;
+  for (let k = 1; k <= n && !bad; k++) for (const e of g.ents) if (def(e.name).kind !== 'rail' && hits(e.name, e.x + v[0] * step * k, e.y + v[1] * step * k, e.dir).size) { bad = k; break; }
+  if (bad) return toast(`La copia ${bad} chocaría con lo que ya hay. Deja sitio o reduce las copias.`, 'warn');
+  const added = [], addedT = [];
+  act(() => {
+    ix(); const have = new Map(railIdx);
+    for (let k = 1; k <= n; k++) {
+      const dx = v[0] * step * k, dy = v[1] * step * k, map = new Map();
+      for (const e of g.ents) {
+        const x = e.x + dx, y = e.y + dy, ex = def(e.name).kind === 'rail' ? have.get(railKey(e.name, x, y, e.dir)) : undefined;
+        const id = ex != null ? ex : addEnt(Object.assign({}, e, { x, y })); map.set(e.id, id); added.push(id);
+      }
+      for (const t of g.tiles) { setTile(t.x + dx, t.y + dy, t.name); addedT.push(K(t.x + dx, t.y + dy)); }
+      if (g.wires.length) { tW(); for (const w of g.wires) S.wires.push([map.get(w[0]), w[1], map.get(w[2]), w[3]]); }
+    }
+  });
+  for (const id of added) sel.add(id); for (const k of addedT) selT.add(k);
+  renderSel(); dirty = true; toast(`${n} ${n === 1 ? 'copia' : 'copias'} hacia ${REPD.find(r => r[1] === dir)[2]} cada ${step} casillas. Ctrl+Z las deshace.`, 'ok');
+}
 function countBy(list) { const m = new Map(); for (const e of list) m.set(e.name, (m.get(e.name) || 0) + 1); return [...m.entries()].sort((a, b) => b[1] - a[1]); }
 function renderContents() {
   const ul = $('#contents'), all = [...S.ents.values()];
-  const g = groupBox({ ents: all, tiles: [...S.tiles.values()] });
+  const g = tileBox({ ents: all, tiles: [...S.tiles.values()] });
   $('#dims').textContent = all.length || S.tiles.size ? `${g.x1 - g.x0} × ${g.y1 - g.y0} casillas` : '';
   if (!all.length && !S.tiles.size) { ul.innerHTML = '<li class="hint" style="padding:0">El plano está vacío.</li>'; return; }
   const rows = countBy(all).map(([n, c]) => `<li><span class="sw" style="background:${def(n).color}"></span>${esc(def(n).label)}<span class="n">${c}</span></li>`);
@@ -1179,6 +1234,7 @@ function instantiate(parsed) { // grupo con ids = entity_number
 }
 function openParsed(parsed) {
   S.ents.clear(); S.tiles.clear(); S.wires = []; S.nextId = 1; sel.clear(); selT.clear(); UNDO.length = 0; REDO.length = 0; TX = null;
+  alignToSnap(parsed);
   const map = new Map();
   for (const e of parsed.ents) { const id = S.nextId++; map.set(e.num, id); S.ents.set(id, { id, name: e.name, n1: e.n1, x: e.x, y: e.y, dir: e.dir, xs: e.xs, extra: e.extra || {} }); }
   for (const t of parsed.tiles) S.tiles.set(K(t.x, t.y), t);
@@ -1186,15 +1242,25 @@ function openParsed(parsed) {
   const m = parsed.meta, fn = n => map.has(n) ? map.get(n) : null;
   S.meta = Object.assign(newMeta(), m, { schedules: BP.mapSched(m.schedules, fn), stock: BP.mapStock(m.stock, fn) });
   S.target = m.scheme; $('#bp-target').value = String(S.target);
-  $('#bp-label').value = S.meta.label; $('#bp-desc').value = S.meta.description;
+  $('#bp-label').value = S.meta.label; $('#bp-desc').value = S.meta.description; renderSnap();
   setMode('select'); idxDirty = true; fitView(); changed(); renderBpSrc();
 }
+// con cuadrícula absoluta, el plano se desplaza para que su desfase respecto a la cuadrícula del editor sea el del juego
+function alignToSnap(parsed) {
+  const sn = BP.getSnap(parsed.meta && parsed.meta.extraBp); if (!sn || !sn.abs || !(parsed.ents.length + parsed.tiles.length)) return;
+  const b = tileBox({ ents: parsed.ents, tiles: parsed.tiles });
+  let dx = ((sn.ox - b.x0) % sn.w + sn.w) % sn.w, dy = ((sn.oy - b.y0) % sn.h + sn.h) % sn.h;
+  if ((dx % 2 || dy % 2) && parsed.ents.some(e => def(e.name).g2)) return;   // las vías no admiten desplazamientos impares
+  if (dx || dy) { for (const e of parsed.ents) { e.x += dx; e.y += dy; } parsed.tiles = parsed.tiles.map(t => ({ x: t.x + dx, y: t.y + dy, name: t.name })); }
+}
+function renderSnap() { setGridInputs('#bp', BP.getSnap(S.meta.extraBp)); dirty = true; }
+['#bp-gw', '#bp-gh', '#bp-gabs'].forEach(id => $(id).addEventListener('change', () => { S.meta.extraBp = BP.setSnap(S.meta.extraBp, readGrid('#bp')); dirty = true; clearTimeout(saveT); saveT = setTimeout(saveDraft, 900); }));
 let pendingBook = null;
 function importObject(obj, how, srcText) {
   if (obj && obj.blueprint_book) {
     const list = BP.flattenBook(obj.blueprint_book);
     if (!list.length) return toast('El libro de planos está vacío', 'warn');
-    openModal('m-import'); $('#imp-text').value = srcText || JSON.stringify(obj); showBook(list, how); return;
+    openModal('m-import'); $('#imp-text').value = srcText || JSON.stringify(obj); showBook(list, how, obj.blueprint_book.label); return;
   }
   if (!obj || !obj.blueprint) {
     const kind = obj && (obj.upgrade_planner ? 'un planificador de mejoras' : obj.deconstruction_planner ? 'un planificador de deconstrucción' : null);
@@ -1208,8 +1274,8 @@ function loadBp(bp, how) {
   if (how === 'hold') holdGroup(instantiate(parsed), `«${parsed.meta.label || 'Plano'}» en el cursor (${parsed.ents.length} entidades): clic para colocarlo, Mayús+clic reemplaza, Esc lo suelta.`);
   else { openParsed(parsed); toast(`Abierto «${parsed.meta.label || 'Plano sin nombre'}»: ${parsed.ents.length} entidades, versión ${BP.verStr(parsed.meta.version)}`, 'ok'); }
 }
-function showBook(list, how) {
-  const ul = $('#imp-book'); pendingBook = list; ul.hidden = false;
+function showBook(list, how, label) {
+  const ul = $('#imp-book'); pendingBook = { list, label: label || 'Libro importado' }; ul.hidden = false; $('#imp-lib').hidden = false;
   ul.innerHTML = list.map((it, i) => `<li><span title="${esc(it.label)}">${esc(it.label)}</span><small class="hint" style="margin:0">${it.n} ent.</small><button class="btn small" data-h="${i}">Al cursor</button><button class="btn small primary" data-o="${i}">Abrir</button></li>`).join('');
   ul.querySelectorAll('button').forEach(b => b.onclick = () => { const it = list[+(b.dataset.o ?? b.dataset.h)]; closeModal($('#m-import')); loadBp(it.bp, b.dataset.o != null ? 'open' : 'hold'); });
   $('#imp-sum').textContent = `Libro de planos con ${list.length} planos. Elige cuál abrir:`; $('#imp-err').textContent = '';
@@ -1217,10 +1283,10 @@ function showBook(list, how) {
 let impT = 0;
 function checkImport() {
   clearTimeout(impT); impT = setTimeout(async () => {
-    const t = $('#imp-text').value; $('#imp-book').hidden = true; $('#imp-err').textContent = ''; $('#imp-sum').textContent = '';
+    const t = $('#imp-text').value; $('#imp-book').hidden = true; $('#imp-lib').hidden = true; pendingBook = null; $('#imp-err').textContent = ''; $('#imp-sum').textContent = '';
     if (!t.trim()) return;
     try { const o = await BP.decode(t);
-      if (o.blueprint_book) return showBook(BP.flattenBook(o.blueprint_book), 'open');
+      if (o.blueprint_book) return showBook(BP.flattenBook(o.blueprint_book), 'open', o.blueprint_book.label);
       if (o.blueprint) { const b = o.blueprint; $('#imp-sum').textContent = `Plano «${b.label || 'sin nombre'}»: ${(b.entities || []).length} entidades, ${(b.tiles || []).length} suelos, versión ${BP.verStr(b.version)}`; }
       else $('#imp-err').textContent = 'Se puede leer, pero no es un plano.';
     } catch (e) { $('#imp-err').textContent = e.message; }
@@ -1229,11 +1295,12 @@ function checkImport() {
 $('#imp-text').addEventListener('input', checkImport);
 async function doImport(how) {
   try { const o = await BP.decode($('#imp-text').value);
-    if (o.blueprint_book) return showBook(BP.flattenBook(o.blueprint_book), how);
+    if (o.blueprint_book) return showBook(BP.flattenBook(o.blueprint_book), how, o.blueprint_book.label);
     closeModal($('#m-import')); importObject(o, how);
   } catch (e) { $('#imp-err').textContent = e.message; }
 }
 $('#imp-open').onclick = () => doImport('open');
+$('#imp-lib').onclick = () => { if (pendingBook && pendingBook.list.length) openSave('book', pendingBook); };
 $('#imp-hold').onclick = () => doImport('hold');
 $('#imp-paste').onclick = async () => {
   try { const t = await navigator.clipboard.readText(); $('#imp-text').value = t; checkImport(); }
@@ -1243,7 +1310,9 @@ $('#imp-paste').onclick = async () => {
 // ----- exportar -----
 function fullBp() {
   S.meta.label = $('#bp-label').value.trim(); S.meta.description = $('#bp-desc').value.trim();
-  return BP.buildBlueprint({ ents: [...S.ents.values()], wires: S.wires, tiles: [...S.tiles.values()], meta: S.meta, target: S.target });
+  const ents = [...S.ents.values()], tiles = [...S.tiles.values()];
+  const meta = Object.assign({}, S.meta, { extraBp: snapExtra(S.meta.extraBp, BP.getSnap(S.meta.extraBp), { ents, tiles }) });
+  return BP.buildBlueprint({ ents, wires: S.wires, tiles, meta, target: S.target });
 }
 function rails20() { let n = 0; for (const e of S.ents.values()) { const d = def(e.name); if (d.kind === 'rail' && (d.rt !== 'S' || e.dir % 4 === 2 || d.elev)) n++; } return n; }
 async function copyAll() {
@@ -1290,45 +1359,144 @@ document.querySelectorAll('.modal').forEach(m => { m.addEventListener('click', e
 
 // ----- biblioteca y borrador -----
 const LS = { get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } }, set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch (e) { return false; } } };
-// Biblioteca: planos guardados en este navegador (localStorage)
-let libLocal = LS.get('bpr.lib', []).filter(x => x && typeof x.str === 'string').map((x, i) => Object.assign({}, x, { id: x.id || 'l' + (+x.t || 0).toString(36) + i }));
-let libDb = [], libCol = null, libView = [];
-const saveLocalLib = () => LS.set('bpr.lib', libLocal);
-const libInit = Promise.resolve();
-function renderLib() {
-  const ul = $('#lib-list');
-  $('#lib-where').textContent = libCol ? 'privados, en tu cuenta' : 'en este navegador';
-  libView = [...libDb.map(x => Object.assign({ src: 'db' }, x)), ...libLocal.map(x => Object.assign({ src: 'local' }, x))].sort((a, b) => b.t - a.t);
-  if (!libView.length) { ul.innerHTML = '<li class="hint" style="padding:0;margin-top:8px">Aún no has guardado ningún plano.</li>'; return; }
-  ul.innerHTML = libView.map((it, i) => `<li><div style="min-width:0;flex:1"><b style="display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(it.name)}</b><span class="meta">${it.n} entidades, ${new Date(it.t).toLocaleDateString('es')}${libCol && it.src === 'local' ? ', solo en este navegador' : ''}</span></div><span class="acts"><button class="btn small" data-o="${i}">Abrir</button><button class="btn small" data-c="${i}" title="Copiar string">Copiar</button><button class="btn small danger" data-d="${i}" aria-label="Borrar ${esc(it.name)}">×</button></span></li>`).join('');
-  ul.querySelectorAll('button').forEach(b => b.onclick = async () => {
-    const it = libView[+(b.dataset.o ?? b.dataset.c ?? b.dataset.d)]; if (!it) return;
-    if (b.dataset.o != null) { try { importObject(await BP.decode(it.str), 'open'); } catch (e) { toast(e.message, 'err'); } return; }
-    if (b.dataset.c != null) { const ok = await writeClip(it.str); toast(ok ? 'String copiado' : 'No se pudo copiar', ok ? 'ok' : 'warn'); return; }
-    if (!(await askConfirm(`¿Borrar «${it.name}»?`, 'Se quitará de tus planos guardados. No se puede deshacer.', 'Borrar'))) return;
-    if (it.src === 'db') { try { await libCol.doc(it.id).delete(); } catch (e) { return toast('No se pudo borrar ahora. Inténtalo de nuevo en un momento.', 'err'); } libDb = libDb.filter(x => x.id !== it.id); }
-    else { libLocal = libLocal.filter(x => x.id !== it.id); saveLocalLib(); }
-    renderLib(); toast(`Borrado «${it.name}»`);
-  });
+// Biblioteca: planos completos y fragmentos guardados en este navegador (localStorage), agrupados por carpetas.
+// Cada elemento guarda el string listo para Factorio; las carpetas se exportan como libros de planos.
+let lib = LS.get('bpr.lib', []).filter(x => x && typeof x.str === 'string').map((x, i) => Object.assign({ folder: '', kind: 'plan' }, x, { id: x.id || 'l' + (+x.t || 0).toString(36) + i }));
+const libClosed = new Set(LS.get('bpr.libClosed', []));
+const saveLib = () => LS.set('bpr.lib', lib);
+const libFolders = () => [...new Set(lib.map(x => x.folder || ''))].sort((a, b) => !a ? 1 : !b ? -1 : a.localeCompare(b, 'es'));
+const THUMB = new Map();
+// miniatura: la silueta del plano con los colores de cada entidad
+async function drawThumb(cnv, it) {
+  let p = THUMB.get(it.id);
+  if (!p) { try { const o = await BP.decode(it.str); p = o.blueprint ? BP.parseBlueprint(o.blueprint) : null; } catch (e) { p = null; } THUMB.set(it.id, p); }
+  const c = cnv.getContext('2d'), W = cnv.width; c.clearRect(0, 0, W, W); if (!p) return;
+  const ents = p.ents.map(e => ({ name: e.name, x: e.x, y: e.y, dir: e.dir, extra: e.extra || {} })), g = groupBox({ ents, tiles: p.tiles });
+  const s = Math.min(W * .9 / Math.max(1, g.x1 - g.x0), W * .9 / Math.max(1, g.y1 - g.y0), 6), ox = (W - (g.x1 - g.x0) * s) / 2 - g.x0 * s, oy = (W - (g.y1 - g.y0) * s) / 2 - g.y0 * s;
+  for (const t of p.tiles) { c.fillStyle = tileDef(t.name).color; c.fillRect(ox + t.x * s, oy + t.y * s, s + .5, s + .5); }
+  for (const e of ents) { if (def(e.name).kind === 'rail') drawRailBed(c, e, ox, oy, s); }
+  for (const e of ents) { if (def(e.name).kind === 'rail') continue; const b = bb(e); drawEnt(c, e, ox + b.x * s, oy + b.y * s, b.w * s, b.h * s, s, null); }
 }
-$('#lib-save').onclick = async () => {
-  if (!S.ents.size && !S.tiles.size) return toast('El plano está vacío', 'warn');
-  const btn = $('#lib-save'); btn.disabled = true;
-  try {
-    const name = ($('#lib-name').value.trim() || $('#bp-label').value.trim() || 'Plano sin nombre').slice(0, 120);
-    const item = { name, str: await BP.encode(fullBp()), n: S.ents.size, t: Date.now() };
-    if (window.claude && !libCol) await Promise.race([libInit, new Promise(r => setTimeout(r, 4000))]);
-    const big = item.str.length > 240000;
-    if (libCol && !big) {
-      try { const ref = libCol.doc(); await ref.set(Object.assign({ kind: 'bp' }, item)); libDb.push(Object.assign({ id: ref.id }, item)); $('#lib-name').value = ''; renderLib(); return toast(`Guardado «${name}» en tu cuenta`, 'ok'); }
-      catch (e) { toast(e && e.code === 'quota_exceeded' ? 'Tus planos guardados han llegado al límite; este se queda en el navegador. Borra alguno para liberar sitio.' : 'No se pudo guardar en tu cuenta; lo guardo en este navegador.', 'warn', 5000); }
+function libMeta(it) {
+  const bits = [`${it.n} ent.`]; if (it.w && it.h) bits.push(`${it.w}×${it.h}`); if (it.grid) bits.push(`cuadrícula ${it.grid}`);
+  return bits.join(' · ') + ' · ' + new Date(it.t).toLocaleDateString('es');
+}
+function renderLib() {
+  const root = $('#lib-list'), q = norm($('#lib-q').value.trim());
+  $('#dl-folders').innerHTML = libFolders().filter(Boolean).map(f => `<option value="${esc(f)}">`).join('');
+  $('#lib-book').disabled = !lib.length;
+  if (!lib.length) { root.innerHTML = '<p class="hint">Aún no has guardado nada. Selecciona una parte de tu diseño y pulsa «Guardar selección» para tenerla a mano como fragmento.</p>'; return; }
+  const view = lib.filter(it => !q || norm(it.name + ' ' + (it.folder || '')).includes(q));
+  if (!view.length) { root.innerHTML = '<p class="hint">Nada coincide con la búsqueda.</p>'; return; }
+  const groups = new Map(); for (const f of libFolders()) groups.set(f, []);
+  for (const it of view.sort((a, b) => b.t - a.t)) groups.get(it.folder || '').push(it);
+  root.innerHTML = [...groups].filter(([, l]) => l.length).map(([f, l]) => `<details class="lfold" data-f="${esc(f)}" ${q || !libClosed.has(f) ? 'open' : ''}>
+    <summary><span class="fn">${esc(f || 'Sin carpeta')}</span><small>${l.length}</small><button class="btn small" data-fbook="${esc(f)}" title="Copiar la carpeta como libro de planos">Libro</button></summary>
+    <ul class="clist lib">${l.map(it => `<li data-id="${esc(it.id)}"><canvas class="thumb" width="88" height="88" aria-hidden="true"></canvas><div class="lm"><b title="${esc(it.name)}">${it.kind === 'frag' ? '<span class="tag">Fragmento</span>' : ''}${esc(it.name)}</b><span class="meta">${esc(libMeta(it))}</span></div>
+      <span class="acts"><button class="btn small primary" data-a="hold" title="Llevarlo en el cursor para colocarlo en el plano actual">Colocar</button></span>
+      <div class="more"><button class="btn small" data-a="open">Abrir</button><button class="btn small" data-a="copy">Copiar string</button><button class="btn small" data-a="edit">Editar</button><button class="btn small danger" data-a="del">Borrar</button></div></li>`).join('')}</ul></details>`).join('');
+  root.querySelectorAll('li[data-id]').forEach(li => { const it = lib.find(x => x.id === li.dataset.id); if (it) drawThumb(li.querySelector('canvas'), it); });
+}
+$('#lib-list').addEventListener('toggle', e => { const d = e.target; if (!d.matches || !d.matches('details.lfold') || $('#lib-q').value.trim()) return; if (d.open) libClosed.delete(d.dataset.f); else libClosed.add(d.dataset.f); LS.set('bpr.libClosed', [...libClosed]); }, true);
+$('#lib-list').addEventListener('click', async e => {
+  const fb = e.target.closest('[data-fbook]');
+  if (fb) { e.preventDefault(); return copyBook(lib.filter(x => (x.folder || '') === fb.dataset.fbook), fb.dataset.fbook || 'Mis planos', false); }
+  const li = e.target.closest('li[data-id]'); if (!li) return;
+  const it = lib.find(x => x.id === li.dataset.id); if (!it) return;
+  const b = e.target.closest('button[data-a]');
+  if (!b) { const was = li.classList.contains('open'); $('#lib-list').querySelectorAll('li.open').forEach(x => x.classList.remove('open')); li.classList.toggle('open', !was); return; }
+  const a = b.dataset.a;
+  if (a === 'hold' || a === 'open') {
+    try { const o = await BP.decode(it.str); if (!o.blueprint) throw new Error('No contiene un plano'); if (a === 'open' && (S.ents.size || S.tiles.size) && !(await askConfirm(`¿Abrir «${it.name}»?`, 'Sustituye lo que hay en el lienzo. Si solo quieres añadirlo, usa «Colocar».', 'Abrir'))) return; loadBp(o.blueprint, a); }
+    catch (err) { toast(err.message, 'err'); }
+    $('#side').classList.remove('open'); return;
+  }
+  if (a === 'copy') { const ok = await writeClip(it.str); return toast(ok ? `String de «${it.name}» copiado` : 'No se pudo copiar', ok ? 'ok' : 'warn'); }
+  if (a === 'edit') return openSave('edit', it);
+  if (!(await askConfirm(`¿Borrar «${it.name}»?`, 'Se quitará de tus planos guardados. No se puede deshacer.', 'Borrar'))) return;
+  lib = lib.filter(x => x.id !== it.id); THUMB.delete(it.id); saveLib(); renderLib(); toast(`Borrado «${it.name}»`);
+});
+$('#lib-q').addEventListener('input', renderLib);
+function libAdd(items) {
+  const prev = lib; lib = [...items, ...lib];
+  if (saveLib()) return true;
+  lib = prev; toast('No se pudo guardar: el navegador no tiene más sitio o no permite guardar datos aquí. Borra algún plano o copia el string para conservarlo.', 'warn', 6000); return false;
+}
+// libro de planos: con folders, una subcarpeta por carpeta
+async function copyBook(items, label, folders) {
+  if (!items.length) return toast('No hay planos que copiar', 'warn');
+  const bpOf = async it => { try { const o = await BP.decode(it.str); return o.blueprint ? { blueprint: Object.assign({}, o.blueprint, { label: it.name }) } : null; } catch (e) { return null; } };
+  const kids = [];
+  if (folders) {
+    for (const f of libFolders()) {
+      const l = items.filter(x => (x.folder || '') === f); if (!l.length) continue;
+      const bps = (await Promise.all(l.map(bpOf))).filter(Boolean);
+      if (f) kids.push(BP.buildBook(f, bps, S.target)); else kids.push(...bps);
     }
-    libLocal.unshift(Object.assign({ id: 'l' + Date.now().toString(36) }, item)); libLocal = libLocal.slice(0, 60);
-    if (saveLocalLib()) { $('#lib-name').value = ''; toast(`Guardado «${name}»` + (libCol ? (big ? ' en este navegador: es demasiado grande para tu cuenta' : ' en este navegador') : ''), 'ok'); }
-    else { libLocal.shift(); toast('No se pudo guardar: este navegador no permite guardar datos aquí. Copia el string para conservarlo.', 'warn', 5000); }
+  } else kids.push(...(await Promise.all(items.map(bpOf))).filter(Boolean));
+  const ok = await writeClip(BP.encodeSync(BP.buildBook(label, kids, S.target)));
+  toast(ok ? `Libro «${label}» copiado (${items.length} planos, para Factorio ${S.target === 1 ? '1.1' : '2.0'}). En el juego: «Importar cadena».` : 'El navegador bloqueó el portapapeles', ok ? 'ok' : 'warn', 4500);
+}
+$('#lib-book').onclick = () => copyBook(lib, 'Mis planos', true);
+$('#lib-import').onclick = () => { openModal('m-import'); $('#imp-text').value = ''; checkImport(); toast('Pega un libro de planos y pulsa «Guardar libro en Mis planos»'); };
+
+// ----- diálogo de guardado: plano completo, selección (fragmento), edición o libro importado -----
+let SV = null;
+function setGridInputs(pfx, g) { $(pfx + '-gw').value = g ? g.w : ''; $(pfx + '-gh').value = g ? g.h : ''; $(pfx + '-gabs').checked = !!(g && g.abs); }
+function readGrid(pfx) { const w = Math.round(+$(pfx + '-gw').value), h = Math.round(+$(pfx + '-gh').value); return w > 0 && h > 0 ? { w, h, abs: $(pfx + '-gabs').checked } : null; }
+function tileBox(g) { const b = groupBox(g); return { x0: Math.floor(b.x0 + 1e-6), y0: Math.floor(b.y0 + 1e-6), x1: Math.ceil(b.x1 - 1e-6), y1: Math.ceil(b.y1 - 1e-6) }; }
+// la cuadrícula del editor empieza en (0, 0): el desfase del plano respecto a ella sale de su esquina superior izquierda
+function snapExtra(extraBp, snap, g) { if (!snap) return BP.setSnap(extraBp, null); const b = tileBox(g); return BP.setSnap(extraBp, Object.assign({}, snap, { ox: b.x0, oy: b.y0 })); }
+function openSave(kind, it) {
+  if (kind === 'plan' && !S.ents.size && !S.tiles.size) return toast('El plano está vacío', 'warn');
+  if (kind === 'sel' && !sel.size && !selT.size) return toast('Selecciona primero lo que quieras guardar (arrastra sobre una zona)', 'warn');
+  const g = kind === 'sel' ? selGroup() : kind === 'plan' ? { ents: [...S.ents.values()], tiles: [...S.tiles.values()], wires: S.wires } : null;
+  SV = { kind, it, g, book: kind === 'book' ? it : null };
+  const b = g ? tileBox(g) : null; SV.size = b ? [b.x1 - b.x0, b.y1 - b.y0] : it && it.w ? [it.w, it.h] : null;
+  $('#sv-t').textContent = { plan: 'Guardar el plano', sel: 'Guardar la selección', edit: 'Editar plano guardado', book: 'Guardar libro en Mis planos' }[kind];
+  $('#sv-what').textContent = kind === 'sel' ? `Fragmento con ${g.ents.length} entidades${g.tiles.length ? ` y ${g.tiles.length} casillas de suelo` : ''} (${SV.size.join(' × ')}). Después podrás colocarlo con el cursor en cualquier plano.`
+    : kind === 'plan' ? `Plano completo: ${g.ents.length} entidades (${SV.size.join(' × ')}).` : kind === 'book' ? `${it.list.length} planos. Se guardan en la carpeta que elijas.` : '';
+  $('#sv-name').closest('.field').hidden = kind === 'book';
+  $('#sv-name').value = kind === 'edit' ? it.name : kind === 'plan' ? ($('#bp-label').value.trim() || '') : '';
+  $('#sv-folder').value = kind === 'edit' ? (it.folder || '') : kind === 'book' ? it.label : (LS.get('bpr.lastFolder', '') || '');
+  $('#sv-grid').hidden = kind === 'book';
+  setGridInputs('#sv', kind === 'plan' ? BP.getSnap(S.meta.extraBp) : kind === 'edit' ? it.snap || null : null);
+  $('#sv-gfit').hidden = !SV.size;
+  openModal('m-save', kind === 'book' ? '#sv-folder' : '#sv-name');
+}
+$('#sv-gfit').onclick = () => { if (!SV || !SV.size) return; $('#sv-gw').value = SV.size[0]; $('#sv-gh').value = SV.size[1]; };
+$('#sv-ok').onclick = async () => {
+  if (!SV) return;
+  const { kind, it, g } = SV, folder = $('#sv-folder').value.trim().slice(0, 60), grid = readGrid('#sv');
+  const name = ($('#sv-name').value.trim() || (kind === 'sel' ? 'Fragmento' : 'Plano sin nombre')).slice(0, 120);
+  const btn = $('#sv-ok'); btn.disabled = true;
+  try {
+    if (kind === 'book') {
+      const now = Date.now(), items = it.list.map((x, i) => { const p = BP.parseBlueprint(x.bp), b = tileBox({ ents: p.ents, tiles: p.tiles }), sn = BP.getSnap(p.meta.extraBp);
+        return { id: 'l' + now.toString(36) + '-' + i, name: x.label.slice(0, 120), folder, kind: 'plan', str: BP.encodeSync({ blueprint: x.bp }), n: x.n, w: b.x1 - b.x0, h: b.y1 - b.y0, grid: sn ? `${sn.w}×${sn.h}` : null, snap: sn, t: now - i }; });
+      if (libAdd(items.reverse())) { closeModal($('#m-save')); closeModal($('#m-import')); toast(`Guardados ${items.length} planos en «${folder || 'Sin carpeta'}»`, 'ok'); }
+    } else if (kind === 'edit') {
+      let str = it.str;
+      if (JSON.stringify(grid) !== JSON.stringify(it.snap ? { w: it.snap.w, h: it.snap.h, abs: it.snap.abs } : null)) {   // la cuadrícula va dentro del string: se reescribe
+        const o = await BP.decode(it.str), p = BP.parseBlueprint(o.blueprint);
+        str = BP.encodeSync({ blueprint: Object.assign({}, BP.setSnap(o.blueprint, null), snapExtra({}, grid, { ents: p.ents, tiles: p.tiles })) });
+      }
+      Object.assign(it, { name, folder, str, grid: grid ? `${grid.w}×${grid.h}` : null, snap: grid }); THUMB.delete(it.id);
+      if (saveLib()) { closeModal($('#m-save')); toast(`Guardado «${name}»`, 'ok'); }
+    } else {
+      const meta = kind === 'plan' ? Object.assign({}, S.meta, { label: name, description: $('#bp-desc').value.trim() }) : { label: name };
+      meta.extraBp = snapExtra(kind === 'plan' ? S.meta.extraBp : {}, grid, g);
+      const str = BP.encodeSync(BP.buildBlueprint({ ents: g.ents, wires: g.wires, tiles: g.tiles, meta, target: S.target }));
+      const item = { id: 'l' + Date.now().toString(36), name, folder, kind: kind === 'sel' ? 'frag' : 'plan', str, n: g.ents.length, w: SV.size[0], h: SV.size[1], grid: grid ? `${grid.w}×${grid.h}` : null, snap: grid, t: Date.now() };
+      if (libAdd([item])) { closeModal($('#m-save')); LS.set('bpr.lastFolder', folder); toast(`Guardado «${name}»${folder ? ` en «${folder}»` : ''}. Pulsa «Colocar» en Mis planos para reutilizarlo.`, 'ok', 4000); }
+    }
     renderLib();
-  } finally { btn.disabled = false; }
+  } catch (err) { toast('No se pudo guardar: ' + err.message, 'err'); }
+  finally { btn.disabled = false; }
 };
+$('#m-save').addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.tagName === 'INPUT' && e.target.type !== 'checkbox') { e.preventDefault(); $('#sv-ok').click(); } });
+$('#lib-save').onclick = () => openSave('plan');
+$('#lib-save-sel').onclick = () => openSave('sel');
 async function saveDraft() { try { if (!S.ents.size && !S.tiles.size) { localStorage.removeItem('bpr.draft'); return; } LS.set('bpr.draft', await BP.encode(fullBp())); } catch (e) { } }
 function renderBpSrc() { $('#bp-src').textContent = S.meta.version ? `Importado de Factorio ${BP.verStr(S.meta.version)}.${S.meta.scheme !== S.target ? ' Al convertir de versión se traducen nombres y direcciones; revisa filtros y combinadores.' : ''}` : 'Si ya lo usas en el juego, elige la misma versión que tengas instalada.'; }
 
