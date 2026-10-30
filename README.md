@@ -7,8 +7,13 @@ Funciona entero en el navegador: no hay servidor ni cuentas, y los planos que gu
 ## Qué puedes hacer
 
 - Importar planos y libros de planos de Factorio 2.0 y 1.1 con Ctrl+V.
-- Construir desde cero con los 107 edificios de Factorio 2.0 y Space Age, con sus tamaños reales. Los que mueven fluidos o calor muestran sus conexiones, y las tuberías solo se unen donde el edificio tiene una.
+- Construir desde cero con todos los edificios de la Factoriopedia de Factorio 2.0 y Space Age (132 piezas en la paleta), con sus tamaños reales: también vías elevadas, rampas y soportes, el vagón de artillería, coche, tanque y spidertron, los suelos de Space Age y, en «Ocultos y modo editor», cargadores, válvulas, cofres y tuberías infinitos e interfaces de energía y calor para mapas de pruebas.
+- Asignar a cada máquina solo las recetas que puede fabricar: la ensambladora ofrece las suyas, la refinería las del petróleo, la fundición las de metalurgia, etc. (326 recetas con su nombre en español). Puedes buscar por el nombre en español o el interno, asignar una receta a todas las máquinas seleccionadas a la vez y, con la pipeta (Q), seguir colocando máquinas con la misma receta. Los que mueven fluidos o calor muestran sus conexiones, y las tuberías solo se unen donde el edificio tiene una.
 - Trazar vías como en el juego: pasa sobre una vía y haz clic en la flecha verde. El trazado sigue al cursor con rectas, curvas y diagonales; cada clic lo coloca y sigue desde su final, y puede empalmar con otra vía o hacer un desvío en mitad de ella. También hay curvas sueltas de 90° y 45°, señales, paradas, locomotoras y vagones.
+- Guardar fragmentos de tus diseños en «Mis planos»: selecciona una parte (una columna de hornos, una fila de balizas, un cruce de trenes) y pulsa «Guardar selección» o Ctrl+B. Se organizan en carpetas, con miniatura y buscador, y «Colocar» los lleva en el cursor para reutilizarlos en cualquier plano.
+- Exportar una carpeta o toda la biblioteca como libro de planos (con una subcarpeta por carpeta) e importar un libro entero a la biblioteca.
+- Diseñar bloques de megabase con la cuadrícula de ajuste del juego (snap-to-grid), absoluta o relativa. El lienzo la dibuja y se exporta con el plano, así que los bloques encajan en el mundo igual que en el editor.
+- Repetir la selección varias veces hacia cualquier lado, con la separación que quieras (Ctrl+D la repite una vez a la derecha), para teselar diseños.
 - Copiar la selección o el plano entero como un string listo para el juego.
 - Exportar para 2.0 o para 1.1, con nombres, direcciones, módulos y cables traducidos.
 
@@ -24,9 +29,21 @@ npm run dev      # abre http://localhost:5173
 | Comando | Qué hace |
 | --- | --- |
 | `npm run dev` | Servidor de desarrollo que recarga al guardar |
-| `npm test` | Pruebas del códec de strings y de la geometría de vías |
+| `npm test` | Pruebas del códec de strings, de los libros de planos y de la geometría de vías |
 | `npm run build` | Genera la versión de producción en `dist/` |
 | `npm run preview` | Sirve `dist/` para revisarla antes de publicar |
+
+### Datos del juego
+
+`src/core/gamedata.js` (edificios con su tamaño, categorías de fabricación de cada máquina y recetas) se genera a partir de los datos oficiales de Factorio. Para actualizarlo cuando salga una versión nueva:
+
+```bash
+git clone --depth 1 https://github.com/wube/factorio-data /tmp/factorio-data
+python3 -I scripts/extract-factorio-data.py /tmp/factorio-data > src/core/gamedata.js
+npm test
+```
+
+`tests/gamedata.test.js` avisa si falta algún edificio en la paleta o si algún tamaño no coincide con el del juego.
 
 ## Publicar en GitHub
 
@@ -76,6 +93,8 @@ src/styles.css          Estilos, con tema claro y oscuro
 src/editor.js           Lienzo, herramientas, paneles y portapapeles
 src/core/blueprint.js   Códec de strings y conversión entre 1.1 y 2.0
 src/core/rails.js       Geometría de las vías de 2.0
+src/core/gamedata.js    Edificios, máquinas y recetas sacados del juego (generado)
+scripts/                Generador de gamedata.js
 tests/                  Pruebas con Vitest
 public/favicon.svg      Icono
 vercel.json             Cabeceras para Vercel
@@ -94,8 +113,11 @@ Los tamaños de los edificios y la posición de sus conexiones de tubería y cal
 ## Límites conocidos
 
 - Las entidades se dibujan con formas propias, no con los gráficos del juego.
+- Los nombres de las recetas en español son propios: los datos públicos del juego no traen las traducciones oficiales, así que alguno puede no coincidir con el del juego. El nombre interno, que es el que va en el plano, siempre es el correcto.
+- Los hornos (de piedra, acero, eléctrico) y la recicladora no tienen receta en el plano: en el juego la eligen solos.
 - Las curvas y las diagonales son de Factorio 2.0. Al exportar para 1.1, el editor avisa de que esa versión no las reconoce.
-- Las vías elevadas de Space Age y las medias diagonales no están en la paleta. Si vienen en un plano importado, se muestran y se conservan al exportar.
+- Las vías elevadas se trazan con el planificador, pero no empalman solas con las rampas: coloca la rampa a mano en su sitio. Las medias diagonales no están en la paleta; si vienen en un plano importado, se muestran y se conservan al exportar.
+- «Mis planos» se guarda en el navegador. Para tener una copia o llevarla a otro equipo, usa «Copiar todo como libro» e impórtalo allí con «Importar libro».
 
 ## Contribuir
 
