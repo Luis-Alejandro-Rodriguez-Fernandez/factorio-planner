@@ -21,7 +21,7 @@ const sel = new Set(), selT = new Set();
 let mode = 'select', tool = null, curDir = 0, ugFlip = false, held = null, clip = null;
 let showGrid = true, showAreas = false, showWires = true;
 const hover = { wx: 0, wy: 0, tx: 0, ty: 0, inside: false };
-let dirty = true, idxDirty = true, P = null;
+let dirty = true, idxDirty = true, P = null, mmVer = 0;   // mmVer: versión del contenido para la caché del minimapa
 
 // ---------- historial ----------
 let TX = null; const UNDO = [], REDO = [];
@@ -52,7 +52,7 @@ function redo() { if (TX) txCommit(); const r = REDO.pop(); if (!r) return toast
 function addEnt(o) { const id = S.nextId++; tE(id); S.ents.set(id, { id, name: o.name, n1: o.n1 || null, x: o.x, y: o.y, dir: o.dir | 0, xs: o.xs || 2, extra: deep(o.extra) || {} }); idxDirty = true; return id; }
 function delEnt(id) { if (!S.ents.has(id)) return; tE(id); S.ents.delete(id); sel.delete(id); idxDirty = true; }
 function setEnt(id, p) { const e = S.ents.get(id); if (!e) return; tE(id); Object.assign(e, p); idxDirty = true; }
-function setTile(x, y, name) { const k = K(x, y); tT(k); if (name) S.tiles.set(k, { x, y, name }); else { S.tiles.delete(k); selT.delete(k); } }
+function setTile(x, y, name) { const k = K(x, y); tT(k); mmVer++; if (name) S.tiles.set(k, { x, y, name }); else { S.tiles.delete(k); selT.delete(k); } }
 
 // ---------- geometría e índice ----------
 // ---------- vías: trazado y caché (la geometría base está en ./core/rails.js) ----------
@@ -89,7 +89,7 @@ const entAtTile = (x, y) => { const id = occ.get(K(x, y)); if (id != null) retur
 const ugType = e => e.extra && e.extra.type === 'output' ? 'output' : 'input';
 function ix() { if (idxDirty) reindex(); }
 function reindex() {
-  idxDirty = false; occ.clear(); occR.clear(); railIdx.clear(); RE = null;
+  idxDirty = false; mmVer++; occ.clear(); occR.clear(); railIdx.clear(); RE = null;
   for (const e of S.ents.values()) {
     if (def(e.name).kind === 'rail') {   // las vías no bloquean (en el juego se cruzan); van en su propio índice
       railIdx.set(railKey(e.name, e.x, e.y, e.dir), e.id);
@@ -156,7 +156,7 @@ function resize() {
 }
 const s2w = (px, py) => [px / V.s + V.ox, py / V.s + V.oy];
 let TH = {};
-function readTheme() { const cs = getComputedStyle(document.documentElement), g = n => cs.getPropertyValue(n).trim(); TH = { bg: g('--cv-bg'), grid: g('--cv-grid'), chunk: g('--cv-chunk'), axis: g('--cv-axis'), acc: g('--accent'), text: g('--text') }; dirty = true; }
+function readTheme() { const cs = getComputedStyle(document.documentElement), g = n => cs.getPropertyValue(n).trim(); TH = { bg: g('--cv-bg'), grid: g('--cv-grid'), chunk: g('--cv-chunk'), axis: g('--cv-axis'), acc: g('--accent'), text: g('--text') }; mmVer++; dirty = true; }
 
 // ---------- utilidades de dibujo ----------
 const SH = new Map();
@@ -582,7 +582,7 @@ function draw() {
     c.fillStyle = 'rgba(255,155,31,.12)'; c.fillRect(SX(x0), SY(y0), w * s, h * s); c.strokeStyle = TH.acc; c.lineWidth = 1.5; c.setLineDash([5, 4]); c.strokeRect(SX(x0) + .5, SY(y0) + .5, w * s, h * s); c.setLineDash([]);
   }
 }
-function frame() { if (dirty) { dirty = false; draw(); } requestAnimationFrame(frame); }
+function frame(t) { navStep(t); if (dirty) { dirty = false; draw(); drawMini(); } requestAnimationFrame(frame); }
 /* ===== Interacción ===== */
 function autoUg(name, x, y, dir, flip) {
   ix(); const d = def(name); let t = 'input';
@@ -957,8 +957,8 @@ function setHover(px, py) {
 let spaceDown = false;
 cv.addEventListener('contextmenu', e => e.preventDefault());
 cv.addEventListener('pointerdown', e => {
-  cv.focus({ preventScroll: true }); cv.setPointerCapture(e.pointerId);
-  const [px, py] = local(e); ptrs.set(e.pointerId, { x: px, y: py }); setHover(px, py);
+  cv.focus({ preventScroll: true }); cv.setPointerCapture(e.pointerId); glide = null;
+  const [px, py] = local(e); lastPtr = [px, py]; ptrs.set(e.pointerId, { x: px, y: py }); setHover(px, py);
   if (ptrs.size === 2) {
     if (TX) txCommit(); if (P && P.kind === 'move') P = null;
     const [a, b] = [...ptrs.values()]; P = { kind: 'pinch', d: Math.hypot(a.x - b.x, a.y - b.y), mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2, s: V.s, ox: V.ox, oy: V.oy };
@@ -992,16 +992,20 @@ cv.addEventListener('pointermove', e => {
     const ns = clamp(P.s * d / Math.max(1, P.d), 2, 128), wx = P.mx / P.s + P.ox, wy = P.my / P.s + P.oy;
     V.s = ns; V.ox = wx - mx / ns; V.oy = wy - my / ns; dirty = true; updateStatus(); return;
   }
-  setHover(px, py);
+  lastPtr = [px, py]; setHover(px, py);
+  if (P && P.kind === 'pan') { V.ox = P.ox - (px - P.sx) / V.s; V.oy = P.oy - (py - P.sy) / V.s; if (Math.hypot(px - P.sx, py - P.sy) > 6) P.tap = false; }
+  else dragUpdate();
+  dirty = true;
+});
+// lo que sigue al cursor mientras se arrastra; también se llama cuando la vista se mueve sola (WASD, minimapa)
+function dragUpdate() {
   if (P) {
-    if (P.kind === 'pan') { V.ox = P.ox - (px - P.sx) / V.s; V.oy = P.oy - (py - P.sy) / V.s; if (Math.hypot(px - P.sx, py - P.sy) > 6) P.tap = false; }
-    else if (P.kind === 'place') contPlace();
+    if (P.kind === 'place') contPlace();
     else if (P.kind === 'erase') eraseAt();
     else if (P.kind === 'move') { const st = P.g2 ? 2 : 1, dx = st * Math.round((hover.wx - P.sx) / st), dy = st * Math.round((hover.wy - P.sy) / st); if (dx !== P.dx || dy !== P.dy) { P.dx = dx; P.dy = dy; P.bad = moveBad(dx, dy); } cv.className = 'c-move'; }
     else if (P.kind === 'marquee') { P.x1 = hover.wx; P.y1 = hover.wy; selectRect(P.x0, P.y0, P.x1, P.y1, P.add, P.base); renderSelSoon(); }
   }
-  dirty = true;
-});
+}
 function endPtr(e) {
   ptrs.delete(e.pointerId);
   if (!P) return;
@@ -1017,7 +1021,7 @@ cv.addEventListener('pointerup', endPtr);
 cv.addEventListener('pointercancel', endPtr);
 cv.addEventListener('pointerleave', e => { if (e.pointerType !== 'touch' && !P) { hover.inside = false; dirty = true; } });
 cv.addEventListener('wheel', e => {
-  e.preventDefault(); const [px, py] = local(e);
+  e.preventDefault(); const [px, py] = local(e); lastPtr = [px, py]; glide = null;
   if (!e.ctrlKey && e.deltaMode === 0 && Math.abs(e.deltaX) > 0.5) { V.ox += e.deltaX / V.s; V.oy += e.deltaY / V.s; }
   else zoomAt(px, py, Math.exp(-e.deltaY * (e.deltaMode === 1 ? .05 : e.ctrlKey ? .01 : .0018)));
   setHover(px, py); dirty = true;
@@ -1053,8 +1057,11 @@ window.addEventListener('keydown', e => {
   if (e.key === ' ') { e.preventDefault(); if (!spaceDown) { spaceDown = true; cv.className = 'c-pan'; } return; }
   if (e.key === 'Escape') { if (RP) { RP = null; updateChip(); dirty = true; return; } if (P && P.kind === 'move') P = null; setMode('select'); sel.clear(); selT.clear(); renderSel(); return; }
   if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); deleteSel(); return; }
-  if (e.key.startsWith('Arrow') && (sel.size || selT.size)) { e.preventDefault(); const v = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] }[e.key]; const m = (e.shiftKey ? 5 : 1) * ([...sel].some(i => def(S.ents.get(i).name).g2) ? 2 : 1); moveSel(v[0] * m, v[1] * m); return; }
+  if (e.key.startsWith('Arrow') && (sel.size || selT.size)) { e.preventDefault(); panKeys.delete(k); const v = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] }[e.key]; const m = (e.shiftKey ? 5 : 1) * ([...sel].some(i => def(S.ents.get(i).name).g2) ? 2 : 1); moveSel(v[0] * m, v[1] * m); return; }
+  if (PANK[k]) { e.preventDefault(); panKeys.add(k); panFast = e.shiftKey; glide = null; return; }
   if (k === 'r') { e.preventDefault(); doRotate(e.shiftKey); }
+  else if (k === 'c') centerView();
+  else if (k === 'm') toggleFlag('mini');
   else if (k === 'q') { if (RP) { RP = null; updateChip(); dirty = true; } else pipette(); }
   else if (k === 't') toggleUg();
   else if (k === 'v') setMode('select');
@@ -1064,8 +1071,106 @@ window.addEventListener('keydown', e => {
   else if (k === '+' || k === '=') zoomAt(CW / 2, CH / 2, 1.25);
   else if (k === '-' || k === '_') zoomAt(CW / 2, CH / 2, .8);
 });
-window.addEventListener('keyup', e => { if (e.key === ' ') { spaceDown = false; cv.className = mode === 'select' ? 'c-sel' : ''; } });
-window.addEventListener('blur', () => { spaceDown = false; });
+window.addEventListener('keyup', e => {
+  panKeys.delete(e.key.toLowerCase()); if (e.key === 'Shift') panFast = false;
+  if (e.key === ' ') { spaceDown = false; cv.className = mode === 'select' ? 'c-sel' : ''; }
+});
+window.addEventListener('keydown', e => { if (e.key === 'Shift') panFast = true; }, true);
+window.addEventListener('blur', () => { spaceDown = false; panKeys.clear(); panFast = false; });
+
+// ----- navegación por planos grandes -----
+// WASD o flechas (sin selección) desplazan la vista con suavidad, a velocidad constante en pantalla
+// sea cual sea el zoom; Mayús la triplica y mantener la tecla acelera poco a poco.
+const PANK = { w: [0, -1], a: [-1, 0], s: [0, 1], d: [1, 0], arrowup: [0, -1], arrowleft: [-1, 0], arrowdown: [0, 1], arrowright: [1, 0] };
+const panKeys = new Set(), RMOT = matchMedia('(prefers-reduced-motion: reduce)');
+let panFast = false, panVX = 0, panVY = 0, panHold = 0, panT = 0, lastPtr = null, glide = null;
+function navStep(t) {
+  const dt = panT ? Math.min(.05, Math.max(0, (t - panT) / 1000)) : 0; panT = t;
+  let moved = false;
+  if (glide) {
+    const p = Math.min(1, (t - glide.t0) / 260), q = 1 - Math.pow(1 - p, 3);
+    V.ox = glide.fx + (glide.tx - glide.fx) * q; V.oy = glide.fy + (glide.ty - glide.fy) * q; moved = true;
+    if (p >= 1) glide = null;
+  }
+  let ix_ = 0, iy_ = 0; for (const k of panKeys) { ix_ += PANK[k][0]; iy_ += PANK[k][1]; }
+  const n = Math.hypot(ix_, iy_);
+  if (n && !(P && (P.kind === 'pan' || P.kind === 'pinch'))) {
+    panHold = Math.min(panHold + dt, 1.5);
+    const sp = (900 + panHold * 500) * (panFast ? 3 : 1), gx = ix_ / n * sp, gy = iy_ / n * sp, a = RMOT.matches ? 1 : 1 - Math.exp(-dt * 12);
+    panVX += (gx - panVX) * a; panVY += (gy - panVY) * a;
+  } else {
+    panHold = 0; const a = RMOT.matches ? 1 : 1 - Math.exp(-dt * 10); panVX -= panVX * a; panVY -= panVY * a;
+    if (Math.abs(panVX) < 4 && Math.abs(panVY) < 4) panVX = panVY = 0;
+  }
+  if (panVX || panVY) { V.ox += panVX * dt / V.s; V.oy += panVY * dt / V.s; moved = true; }
+  if (moved) viewMoved();
+}
+// la vista cambió sin mover el ratón: lo que hay bajo el cursor también cambia
+function viewMoved() {
+  if (hover.inside && lastPtr) { setHover(lastPtr[0], lastPtr[1]); dragUpdate(); } else updateStatus();
+  dirty = true;
+}
+function glideTo(cx, cy) {
+  const tx = cx - CW / 2 / V.s, ty = cy - CH / 2 / V.s;
+  if (RMOT.matches) { V.ox = tx; V.oy = ty; viewMoved(); return; }
+  glide = { fx: V.ox, fy: V.oy, tx, ty, t0: performance.now() };
+}
+// C: centra la vista en la selección, o en el punto bajo el cursor
+function centerView() {
+  if (sel.size || selT.size) { const g = groupBox(selGroup()); glideTo((g.x0 + g.x1) / 2, (g.y0 + g.y1) / 2); }
+  else if (hover.inside) glideTo(hover.wx, hover.wy);
+  else fitView();
+}
+
+// ----- minimapa: el plano entero en pequeño; el recuadro es lo que ves. Clic o arrastre para ir ahí -----
+const mm = $('#mm'), mmc = mm.getContext('2d'), mmBuf = document.createElement('canvas');
+let showMini = true, mmKey = '', mmT = null, mmDrag = null, mmCB = null, mmCBv = -1;
+function contentBox() {
+  if (mmCBv !== mmVer) { mmCBv = mmVer; mmCB = groupBox({ ents: S.ents.values(), tiles: S.tiles.values() }); }
+  return mmCB;
+}
+function drawMini() {
+  const on = showMini && !!(S.ents.size || S.tiles.size);
+  if (mm.hidden === on) mm.hidden = !on;
+  if (!on) { mmT = null; return; }
+  const W = mm.clientWidth, H = mm.clientHeight; if (!W || !H) return;
+  const pw = Math.round(W * DPR), ph = Math.round(H * DPR);
+  if (mm.width !== pw || mm.height !== ph) { mm.width = pw; mm.height = ph; }
+  const vx0 = V.ox, vy0 = V.oy, vx1 = V.ox + CW / V.s, vy1 = V.oy + CH / V.s;
+  let T = mmDrag && mmDrag.T;   // mientras se arrastra, la escala queda fija para que el mapa no se mueva bajo el dedo
+  if (!T) {
+    const cb = contentBox(), pad = Math.max(4, Math.max(cb.x1 - cb.x0, cb.y1 - cb.y0) * .06);
+    const x0 = Math.min(cb.x0 - pad, vx0), y0 = Math.min(cb.y0 - pad, vy0), x1 = Math.max(cb.x1 + pad, vx1), y1 = Math.max(cb.y1 + pad, vy1);
+    const s = Math.min(W / (x1 - x0), H / (y1 - y0));
+    T = { s, ox: (W - (x1 - x0) * s) / 2 - x0 * s, oy: (H - (y1 - y0) * s) / 2 - y0 * s };
+  }
+  mmT = T;
+  const key = [mmVer, pw, ph, T.s.toPrecision(6), T.ox.toFixed(1), T.oy.toFixed(1)].join();
+  if (key !== mmKey) {   // el contenido solo se vuelve a pintar si cambió el plano o el encuadre
+    mmKey = key; mmBuf.width = pw; mmBuf.height = ph;
+    const b = mmBuf.getContext('2d'), { s, ox, oy } = T, m = 1 / DPR;
+    b.setTransform(DPR, 0, 0, DPR, 0, 0); b.fillStyle = TH.bg; b.fillRect(0, 0, W, H);
+    for (const t of S.tiles.values()) { b.fillStyle = tileDef(t.name).color; b.fillRect(ox + t.x * s, oy + t.y * s, Math.max(s, m), Math.max(s, m)); }
+    for (const e of S.ents.values()) if (def(e.name).kind === 'rail') drawRailBed(b, e, ox, oy, Math.min(s, 6));
+    for (const e of S.ents.values()) { const d = def(e.name); if (d.kind === 'rail') continue; const r = bb(e); b.fillStyle = d.color; b.fillRect(ox + r.x * s, oy + r.y * s, Math.max(r.w * s, m), Math.max(r.h * s, m)); }
+  }
+  const c = mmc; c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, pw, ph); c.drawImage(mmBuf, 0, 0);
+  c.setTransform(DPR, 0, 0, DPR, 0, 0);
+  const rx = T.ox + vx0 * T.s, ry = T.oy + vy0 * T.s, rw = Math.max(3, (vx1 - vx0) * T.s), rh = Math.max(3, (vy1 - vy0) * T.s);
+  c.fillStyle = TH.acc; c.globalAlpha = .16; c.fillRect(rx, ry, rw, rh); c.globalAlpha = 1;
+  c.strokeStyle = TH.acc; c.lineWidth = 1.5; c.strokeRect(rx + .75, ry + .75, rw - 1.5, rh - 1.5);
+}
+function mmJump(e) {
+  const T = mmDrag ? mmDrag.T : mmT; if (!T) return;
+  const r = mm.getBoundingClientRect(), wx = (e.clientX - r.left - T.ox) / T.s, wy = (e.clientY - r.top - T.oy) / T.s;
+  glide = null; V.ox = wx - CW / 2 / V.s; V.oy = wy - CH / 2 / V.s; viewMoved();
+}
+mm.addEventListener('pointerdown', e => { if (e.button !== 0) return; e.preventDefault(); mm.setPointerCapture(e.pointerId); mmDrag = { T: mmT }; mmJump(e); });
+mm.addEventListener('pointermove', e => { if (mmDrag) mmJump(e); });
+const mmEnd = () => { if (mmDrag) { mmDrag = null; dirty = true; } };
+mm.addEventListener('pointerup', mmEnd); mm.addEventListener('pointercancel', mmEnd);
+mm.addEventListener('wheel', e => { e.preventDefault(); glide = null; zoomAt(CW / 2, CH / 2, Math.exp(-e.deltaY * (e.deltaMode === 1 ? .05 : .0018))); }, { passive: false });
+mm.addEventListener('contextmenu', e => e.preventDefault());
 /* ===== Paneles, importación/exportación y arranque ===== */
 function toast(msg, kind, ms) {
   const el = document.createElement('div'); el.className = 'toast ' + (kind || ''); el.textContent = msg; $('#toasts').appendChild(el);
@@ -1573,13 +1678,14 @@ function loadExample() {
 // ----- botones -----
 function toggleFlag(f) {
   if (f === 'grid') showGrid = !showGrid; else if (f === 'areas') showAreas = !showAreas; else if (f === 'wires') showWires = !showWires;
-  const on = { grid: showGrid, areas: showAreas, wires: showWires }[f]; const b = document.querySelector(`.tool[data-act="${f}"]`); if (b) b.classList.toggle('on', on); dirty = true;
+  else if (f === 'mini') { showMini = !showMini; LS.set('bpr.mini', showMini); }
+  const on = { grid: showGrid, areas: showAreas, wires: showWires, mini: showMini }[f]; const b = document.querySelector(`.tool[data-act="${f}"]`); if (b) b.classList.toggle('on', on); dirty = true;
 }
 document.querySelectorAll('.tool[data-act]').forEach(b => b.addEventListener('click', () => {
   const a = b.dataset.act;
   if (a === 'select' || a === 'erase') setMode(a === mode && a === 'erase' ? 'select' : a);
   else if (a === 'rotate') doRotate(false); else if (a === 'pipette') { pipette(); if (!hover.inside) toast('Pasa el ratón sobre una entidad y pulsa Q', 'warn'); }
-  else if (a === 'undo') undo(); else if (a === 'redo') redo(); else if (a === 'fit') fitView(); else toggleFlag(a);
+  else if (a === 'undo') undo(); else if (a === 'redo') redo(); else if (a === 'fit') fitView(); else if (a === 'center') centerView(); else toggleFlag(a);
   cv.focus({ preventScroll: true });
 }));
 $('#b-new').onclick = async () => { if ((S.ents.size || S.tiles.size) && !(await askConfirm('¿Empezar un plano vacío?', 'Lo que hay ahora en el lienzo se perderá si no lo has copiado o guardado.', 'Empezar de cero'))) return; openParsed({ ents: [], tiles: [], wires: [], meta: newMeta() }); S.target = 2; $('#bp-target').value = '2'; renderBpSrc(); };
@@ -1595,6 +1701,7 @@ document.addEventListener('pointerdown', e => { const sd = $('#side'); if (sd.cl
 
 // ----- arranque -----
 readTheme();
+showMini = LS.get('bpr.mini', true) !== false; { const b = document.querySelector('.tool[data-act="mini"]'); if (b) b.classList.toggle('on', showMini); }
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', readTheme);
 new MutationObserver(readTheme).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'class', 'style'] });
 new ResizeObserver(resize).observe(cv);
