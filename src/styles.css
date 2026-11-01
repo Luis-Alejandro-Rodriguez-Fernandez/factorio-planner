@@ -99,6 +99,8 @@ kbd{font:600 12px var(--ui);padding:1px 6px;border-radius:4px;background:var(--b
 .chip{position:absolute;left:62px;top:10px;display:flex;align-items:center;gap:10px;padding:5px 12px 5px 5px;max-width:calc(100% - 76px);background:var(--glass);border:1px solid var(--line);border-radius:8px;box-shadow:0 4px 14px var(--bevel-lo);font-size:14px;line-height:1.25}
 .chip canvas{width:34px;height:34px;border-radius:5px;background:var(--cv-bg);flex:none}
 .chip small{display:block;color:var(--muted);font-size:12.5px}
+.mini{position:absolute;right:10px;bottom:34px;z-index:2;width:220px;height:150px;border:1px solid var(--line);border-radius:8px;background:var(--glass);box-shadow:0 4px 14px var(--bevel-lo);cursor:crosshair;touch-action:none}
+.mini[hidden]{display:none}
 .status{position:absolute;left:0;right:0;bottom:0;display:flex;gap:16px;flex-wrap:wrap;padding:14px 14px 6px 60px;font-size:13px;color:var(--text);pointer-events:none;background:linear-gradient(to top,var(--glass),transparent)}
 .status span{white-space:nowrap}
 .status .dim{color:var(--muted)}
@@ -205,6 +207,7 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
   .status .opt{display:none}
   .chip{top:auto;bottom:34px;left:10px}
   .empty{padding-left:12px;bottom:34px}
+  .mini{width:150px;height:104px;bottom:30px}
 }
 @media (max-width:540px){
   .brand>div:not(.logo){display:none}
