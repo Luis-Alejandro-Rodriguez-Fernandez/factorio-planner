@@ -1724,13 +1724,51 @@ async function showPage(pg) {
   if (pg.view) { V.ox = pg.view.ox; V.oy = pg.view.oy; V.s = clamp(pg.view.s || 32, 2, 128); }
   hover.inside = false; dirty = true; updateStatus(); renderPages();
 }
+// ----- almacén local: IndexedDB (sitio para cientos de MB), con localStorage de reserva si el navegador no lo deja usar -----
+const DB = (() => {
+  let dbp = null;
+  const open = () => dbp || (dbp = new Promise((res, rej) => {
+    try { const r = indexedDB.open('blueprinter', 1); r.onupgradeneeded = () => r.result.createObjectStore('kv'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); r.onblocked = () => rej(new Error('bloqueada')); }
+    catch (e) { rej(e); }
+  }));
+  const run = async (mode, fn) => { const db = await open(); return new Promise((res, rej) => { const t = db.transaction('kv', mode), rq = fn(t.objectStore('kv')); t.oncomplete = () => res(rq.result); t.onerror = t.onabort = () => rej(t.error || new Error('transacción cancelada')); }); };
+  return {
+    async get(k) { try { return await run('readonly', st => st.get(k)); } catch (e) { return LS.get('bpr.kv.' + k, undefined); } },
+    async set(k, v) { try { await run('readwrite', st => st.put(v, k)); return true; } catch (e) { return LS.set('bpr.kv.' + k, v); } },
+    // varias escrituras y borrados en una sola transacción: o se guardan todas o ninguna
+    async batch(puts, dels) {
+      try { await run('readwrite', st => { let rq = null; for (const [k, v] of puts) rq = st.put(v, k); for (const k of dels || []) rq = st.delete(k); return rq || st.count(); }); return true; }
+      catch (e) { let ok = true; for (const [k, v] of puts) ok = LS.set('bpr.kv.' + k, v) && ok; for (const k of dels || []) { try { localStorage.removeItem('bpr.kv.' + k); } catch (_) { } } return ok; }
+    },
+    async del(k) { try { await run('readwrite', st => st.delete(k)); } catch (e) { } try { localStorage.removeItem('bpr.kv.' + k); } catch (e) { } },
+  };
+})();
+// Las páginas se guardan por separado (índice + un registro por página) y solo se reescribe la que cambió.
+const savedStr = new Map();
+let saveSeq = 0, saveChain = Promise.resolve();
+function setSaveState(st, why) {
+  const el = $('#pg-save'); if (!el) return;
+  el.dataset.st = st;
+  el.textContent = { saving: 'Guardando…', saved: 'Guardado', error: 'Sin guardar' }[st];
+  el.title = st === 'error' ? 'No se pudo guardar en este navegador' + (why ? ` (${why})` : '') + '. Descarga las páginas con el botón de al lado para no perderlas.' : st === 'saved' ? 'Tus páginas abiertas están guardadas en este navegador y vuelven al recargar' : 'Guardando tus páginas en este navegador';
+}
+function pageIndex() { return { v: 2, active: pages.indexOf(pageCur), list: pages.map(p => ({ id: p.id, label: p.label || '', view: p.view || null, n: p.n || 0, target: p.target || 2, ver: p.ver ?? null })) }; }
 function savePages() {
-  if (!pageCur) return;
+  if (!pageCur) return saveChain;
   try { writePage(pageCur); } catch (e) { }
-  const ok = LS.set('bpr.pages', { v: 1, active: pages.indexOf(pageCur), list: pages.map(p => ({ id: p.id, label: p.label || '', str: p.str || '', view: p.view || null, n: p.n || 0, target: p.target || 2, ver: p.ver ?? null })) });
-  if (!ok && !pageWarned) { pageWarned = true; toast('No se pudieron guardar las páginas en este navegador (no queda sitio o no deja guardar). Descárgalas con el botón de la barra de páginas para no perderlas.', 'warn', 7000); }
-  try { localStorage.removeItem('bpr.draft'); } catch (e) { }
   renderPages();
+  const seq = ++saveSeq, snap = pages.map(p => [p.id, p.str || '']), index = pageIndex();
+  setSaveState('saving');
+  saveChain = saveChain.then(async () => {
+    const puts = snap.filter(([id, str]) => savedStr.get(id) !== str).map(([id, str]) => ['page:' + id, str]), gone = [...savedStr.keys()].filter(id => !snap.some(([i]) => i === id));
+    puts.push(['pages', index]);
+    const ok = await DB.batch(puts, gone.map(id => 'page:' + id));
+    if (ok) { for (const [id, str] of snap) savedStr.set(id, str); for (const id of gone) savedStr.delete(id); }
+    if (ok) { try { localStorage.removeItem('bpr.pages'); localStorage.removeItem('bpr.draft'); localStorage.removeItem('bpr.rescue'); } catch (e) { } }
+    if (seq === saveSeq) setSaveState(ok ? 'saved' : 'error', ok ? '' : 'no queda sitio o el navegador no deja guardar');
+    if (!ok && !pageWarned) { pageWarned = true; toast('No se pudieron guardar las páginas en este navegador. Descárgalas con el botón de la barra de páginas para no perderlas.', 'warn', 7000); }
+  }).catch(e => { setSaveState('error', e && e.message); });
+  return saveChain;
 }
 // crea una página vacía detrás de la actual y la deja activa (sin dibujar nada aún)
 function addPage() {
@@ -1794,12 +1832,30 @@ $('#ptabs').addEventListener('keydown', e => {
   else if (e.key === 'Delete') { e.preventDefault(); closePage(pg); }
   else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); stepPage(e.key === 'ArrowLeft' ? -1 : 1); setTimeout(() => { const t = $('#ptabs .ptab.on'); if (t) t.focus(); }, 0); }
 });
-window.addEventListener('pagehide', () => { try { savePages(); } catch (e) { } });
+// al cerrar o recargar, la página activa se copia también al instante en localStorage por si el guardado no llega a terminar
+function rescueNow() {
+  if (!pageCur) return;
+  try { writePage(pageCur); } catch (e) { return; }
+  if (savedStr.get(pageCur.id) !== (pageCur.str || '')) LS.set('bpr.rescue', { id: pageCur.id, str: pageCur.str || '', index: pageIndex() });
+  savePages();
+}
+window.addEventListener('pagehide', rescueNow);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') rescueNow(); });
 async function startPages() {
-  const st = LS.get('bpr.pages', null);
-  if (st && Array.isArray(st.list)) {
-    pages = st.list.filter(p => p && typeof p.str === 'string').map(p => ({ id: p.id || pageId(), label: p.label || '', str: p.str, view: p.view || null, n: p.n || 0, target: p.target === 1 ? 1 : 2, ver: p.ver ?? null }));
-    if (pages.length) { await showPage(pages[clamp(st.active | 0, 0, pages.length - 1)]); updateEmpty(); return; }
+  try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => { }); } catch (e) { }   // que el navegador no lo borre si se queda sin sitio
+  let idx = await DB.get('pages'), fromOld = false;
+  if (!(idx && Array.isArray(idx.list) && idx.list.length)) { const st = LS.get('bpr.pages', null); if (st && Array.isArray(st.list) && st.list.length) { idx = st; fromOld = true; } }   // versión anterior: todo en localStorage
+  const rescue = LS.get('bpr.rescue', null);
+  if (!(idx && idx.list && idx.list.length) && rescue && rescue.index) idx = rescue.index;
+  if (idx && Array.isArray(idx.list) && idx.list.length) {
+    pages = await Promise.all(idx.list.filter(p => p && p.id).map(async p => {
+      const stored = typeof p.str === 'string' ? null : await DB.get('page:' + p.id);
+      const str = typeof p.str === 'string' ? p.str : (typeof stored === 'string' ? stored : '');
+      if (!fromOld && typeof stored === 'string') savedStr.set(p.id, stored);
+      return { id: p.id, label: p.label || '', str, view: p.view || null, n: p.n || 0, target: p.target === 1 ? 1 : 2, ver: p.ver ?? null };
+    }));
+    if (rescue && rescue.id) { const pg = pages.find(p => p.id === rescue.id); if (pg && typeof rescue.str === 'string') pg.str = rescue.str; }
+    if (pages.length) { await showPage(pages[clamp(idx.active | 0, 0, pages.length - 1)]); updateEmpty(); savePages(); return; }
   }
   const d = LS.get('bpr.draft', null);
   if (d) { pages = [{ id: pageId(), label: '', str: d, n: 0 }]; await showPage(pages[0]); savePages(); toast('Recuperado tu último plano'); return; }

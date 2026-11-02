@@ -6,7 +6,8 @@ Funciona entero en el navegador: no hay servidor ni cuentas, y los planos que gu
 
 ## Qué puedes hacer
 
-- Tener varios planos abiertos a la vez en páginas (pestañas encima del lienzo), cada uno con su historial de deshacer, su vista y su versión de exportación. Se guardan solas en el navegador; doble clic en una pestaña cambia el nombre y Alt+← / Alt+→ cambian de página.
+- Tener varios planos abiertos a la vez en páginas (pestañas encima del lienzo), cada uno con su historial de deshacer, su vista y su versión de exportación. Doble clic en una pestaña cambia el nombre y Alt+← / Alt+→ cambian de página.
+- Guardar solo los trabajos abiertos: cada página se guarda en la base de datos del navegador (IndexedDB, con sitio para cientos de MB) poco después de cada cambio, al cambiar de página y al cerrar la pestaña, y vuelve al recargar. La barra de páginas indica si está guardado. Si el navegador no deja usar IndexedDB se usa localStorage, y al cerrar se deja además una copia de rescate de la página activa.
 - Abrir plantillas de serie para verlas y editarlas. La primera vez que entras se abre el pack **Megabase Vulcano**, un plano por página (ver más abajo).
 - Descargar el plano, todas las páginas o tu biblioteca como un archivo `.txt` con el string del juego, y abrir archivos `.txt` o `.json` con «Importar → Abrir archivo» o soltándolos sobre la ventana. Un libro se puede abrir entero en páginas.
 - Importar planos y libros de planos de Factorio 2.0 y 1.1 con Ctrl+V.
@@ -136,7 +137,7 @@ Los tamaños de los edificios y la posición de sus conexiones de tubería y cal
 - Los hornos (de piedra, acero, eléctrico) y la recicladora no tienen receta en el plano: en el juego la eligen solos.
 - Las curvas y las diagonales son de Factorio 2.0. Al exportar para 1.1, el editor avisa de que esa versión no las reconoce.
 - Las vías elevadas se trazan con el planificador, pero no empalman solas con las rampas: coloca la rampa a mano en su sitio. Las medias diagonales no están en la paleta; si vienen en un plano importado, se muestran y se conservan al exportar.
-- «Mis planos» y las páginas se guardan en el navegador. Para tener una copia o llevarla a otro equipo, descárgalas (botón «Descargar» de Mis planos o el de la barra de páginas) y ábrelas allí con «Importar → Abrir archivo».
+- «Mis planos» y las páginas se guardan en el navegador: no pasan a otro equipo ni sobreviven a borrar los datos del sitio. Para tener una copia o llevarla a otro equipo, descárgalas (botón «Descargar» de Mis planos o el de la barra de páginas) y ábrelas allí con «Importar → Abrir archivo».
 - El pack de Vulcano se ha comprobado con las reglas del juego que conoce el editor (tamaños, recetas, conexiones de fluidos, alcance de subestaciones y balizas), no dentro de Factorio. Si algo no encaja en tu partida, ajústalo aquí y vuelve a exportarlo.
 
 ## Contribuir

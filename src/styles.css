@@ -78,6 +78,11 @@ kbd{font:600 12px var(--ui);padding:1px 6px;border-radius:4px;background:var(--b
 .ptab .px{border:0;background:transparent;color:var(--muted);font-size:16px;line-height:1;padding:1px 5px;border-radius:4px;cursor:pointer}
 .ptab .px:hover{background:var(--btn-hi);color:var(--danger)}
 .ptab input{width:150px;padding:1px 5px;font:inherit;border:1px solid var(--accent);border-radius:4px;background:var(--inset)}
+.psave{flex:none;align-self:center;margin-left:auto;padding:2px 8px 2px 18px;font-size:12.5px;color:var(--muted);white-space:nowrap;position:relative}
+.psave::before{content:"";position:absolute;left:6px;top:50%;width:7px;height:7px;margin-top:-3.5px;border-radius:50%;background:var(--ok)}
+.psave[data-st="saving"]::before{background:var(--warn)}
+.psave[data-st="error"]{color:var(--danger);font-weight:600}
+.psave[data-st="error"]::before{background:var(--danger)}
 .pbtn{flex:none;align-self:center;width:30px;height:28px;display:grid;place-items:center;border:1px solid transparent;border-radius:6px;background:transparent;color:var(--text);font-size:19px;line-height:1;cursor:pointer}
 .pbtn:hover{background:var(--btn);border-color:var(--line-2)}
 .pbtn svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
@@ -239,6 +244,7 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
   .empty{padding-left:12px;bottom:34px}
   .mini{width:150px;height:104px;bottom:30px}
   .ptab{max-width:160px}
+  .psave{font-size:0;padding-left:14px}
 }
 @media (max-width:540px){
   .brand>div:not(.logo){display:none}
