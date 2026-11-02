@@ -15,6 +15,7 @@
  * balizas de cada bloque, sin contar las investigaciones de productividad.
  */
 import { BP } from './blueprint.js';
+import { railTurtle, normDir } from './rails.js';
 
 const { def, sz } = BP;
 export const BLOCK = 50;
@@ -59,7 +60,10 @@ export function rate(machine, mods, beacons) {
 
 // ----- constructor de planos -----
 class Plan {
-  constructor() { this.ents = []; this.id = 1; }
+  constructor() { this.ents = []; this.tiles = []; this.id = 1; }
+  // entidad por su centro (vías, señales, trenes)
+  raw(name, x, y, dir, extra) { const e = { id: this.id++, name, x, y, dir: dir | 0, extra: extra || {} }; this.ents.push(e); return e; }
+  rails(pieces) { for (const r of pieces) this.raw(r.name, r.x, r.y, r.dir); }
   // coloca por su esquina superior izquierda (tx, ty), con la dirección dada (N, E, S, W)
   put(name, tx, ty, d, extra) {
     const dir = typeof d === 'string' ? DIR[d] : (d | 0), [w, h] = sz(def(name), dir);
@@ -99,9 +103,27 @@ function busTap(p, y) {
   p.hpipe(x, BLOCK - 1, y);
 }
 const grid = () => BP.setSnap({}, { w: BLOCK, h: BLOCK, abs: true, ox: 0, oy: 0 });
+// ----- acabado: suelo de hormigón refinado con borde de hormigón de peligro y lámparas junto a las subestaciones -----
+const RAILY = new Set(['straight-rail', 'curved-rail-a', 'curved-rail-b']);
+function decorate(p, W, H) {
+  const busy = new Set(), K2 = (x, y) => x + ',' + y;
+  for (const e of p.ents) {
+    const [w, h] = RAILY.has(e.name) ? [4, 4] : sz(def(e.name), e.dir);   // las vías reservan algo más de sitio
+    for (let y = Math.floor(e.y - h / 2 + 1e-6); y < Math.ceil(e.y + h / 2 - 1e-6); y++) for (let x = Math.floor(e.x - w / 2 + 1e-6); x < Math.ceil(e.x + w / 2 - 1e-6); x++) busy.add(K2(x, y));
+  }
+  for (const s of p.ents.filter(e => e.name === 'substation')) {
+    const x0 = s.x - 1, y0 = s.y - 1;
+    for (const [x, y] of [[x0 + 2, y0], [x0 - 1, y0 + 1], [x0 + 1, y0 + 2], [x0, y0 - 1], [x0 + 2, y0 + 1], [x0 - 1, y0]]) {
+      if (x < 1 || y < 1 || x >= W - 1 || y >= H - 1 || busy.has(K2(x, y))) continue;
+      p.put('small-lamp', x, y, 0); busy.add(K2(x, y)); break;
+    }
+  }
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) p.tiles.push({ x, y, name: x === 0 || y === 0 || x === W - 1 || y === H - 1 ? 'refined-hazard-concrete-left' : 'refined-concrete' });
+}
 function bp(label, description, p, block) {
+  if (block !== false) decorate(p, (block && block.w) || BLOCK, BLOCK);
   const mw = powerMW(p.ents); if (mw >= 1) description += `\nConsumo eléctrico: unos ${f1(mw)} MW a pleno rendimiento.`;
-  const out = BP.buildBlueprint({ ents: p.ents, wires: [], tiles: [], meta: { label, description, extraBp: block === false ? {} : grid() }, target: 2 });
+  const out = BP.buildBlueprint({ ents: p.ents, wires: [], tiles: p.tiles, meta: { label, description, extraBp: block === false ? {} : grid(), schedules: p.schedules || null }, target: 2 });
   return out;
 }
 const f1 = v => (Math.round(v * 10) / 10).toLocaleString('es');
@@ -277,14 +299,105 @@ export function powerMW(ents) {
   return kw / 1000;
 }
 
+// ----- trenes 1-4: una locomotora y cuatro vagones de carga -----
+// Doble vía con circulación por la derecha: hacia el este por la vía sur (fila 27) y hacia el oeste por la norte (fila 23).
+// Las piezas miden 50 de alto y encajan con la cuadrícula de bloques; su roboport y sus subestaciones enlazan con los
+// bloques de debajo. Las estaciones están en un apartadero: un tren parado no corta la línea.
+export const RAIL = { wb: 23, eb: 27, siding: 35 };
+export const TRAIN_LOAD = 4 * 40 * 50;                      // 4 vagones × 40 huecos × pilas de 50 (mineral, carbón o calcita)
+export const UNLOAD = 'Vulcano · Descarga';
+const SIG = 'rail-signal', CHAIN = 'rail-chain-signal';
+// señal para trenes hacia el este (a la derecha de la vía, mirando atrás) o hacia el oeste, en el final de vía de x
+const sigE = (p, x, name, y) => p.raw(name || SIG, x - 0.5, (y || RAIL.eb) + 1.5, 12);
+const sigW = (p, x, name) => p.raw(name || SIG, x + 0.5, RAIL.wb - 1.5, 4);
+function mains(p, x0, x1) { for (const y of [RAIL.wb, RAIL.eb]) p.rails(railTurtle(x0, y, 4).straight((x1 - x0) / 2).pieces); }
+function stripSkeleton(p, W) {
+  for (let x = 0; x < W; x += BLOCK) { p.put('roboport', x, 44, 0); for (const c of POLE_AT) p.put('substation', x + c - 1, 40, 0); }
+}
+function linePiece() {
+  const p = new Plan(); mains(p, 0, 50); sigE(p, 48); sigW(p, 2); stripSkeleton(p, 50);
+  return bp('Tren · Línea principal (doble vía)', 'Tramo recto de 50 casillas con doble vía: hacia el este por la vía sur y hacia el oeste por la norte, con una señal por sentido. Trae roboport y subestaciones: la red de robots y la corriente siguen junto a la vía, así que los puestos mineros reciben electricidad de la fábrica. Gíralo con R para hacer tramos verticales.', p);
+}
+function cornerPiece() {
+  const p = new Plan();
+  p.rails(railTurtle(0, RAIL.eb, 4).straight(7).turn(-1, 4).straight(7).pieces);
+  p.rails(railTurtle(0, RAIL.wb, 4).straight(5).turn(-1, 4).straight(5).pieces);
+  // subestaciones que siguen la curva: enlazan con las de la línea del oeste (fila 41) y con las de la línea girada (columna 41)
+  for (const [x, y] of [[8, 41], [25, 41], [42, 41], [42, 25], [42, 8]]) p.put('substation', x - 1, y - 1, 0);
+  return bp('Tren · Curva de doble vía', 'Curva de 90° que une la línea que llega por el oeste con la que sale por el norte, sin cruzar los dos sentidos. Lleva subestaciones para que la corriente siga junto a la vía. Gírala con R para los otros tres giros.', p);
+}
+// retorno al final de la línea: la vía hacia el este da la vuelta y vuelve por la vía hacia el oeste
+function loopRails(p) {
+  p.rails(railTurtle(0, RAIL.eb, 4).straight(18).turn(-1, 4).turn(-1, 4).turn(-1, 2).straight(7).turn(1, 2).straight(2).pieces);
+  sigE(p, 34); sigW(p, 2);
+}
+function rot180(p, W, H) {
+  for (const e of p.ents) { e.x = W - e.x; e.y = H - e.y; e.dir = RAILY.has(e.name) ? normDir(e.name, e.dir + 8) : (e.dir + 8) % 16; }
+  return p;
+}
+function loopPiece(west) {
+  const p = new Plan(); loopRails(p); if (west) rot180(p, 50, 50);
+  return bp(west ? 'Tren · Retorno oeste' : 'Tren · Retorno este',
+    `Fin de línea: los trenes que llegan por la vía ${west ? 'norte (hacia el oeste) dan la vuelta y salen por la sur hacia el este' : 'sur (hacia el este) dan la vuelta y salen por la norte hacia el oeste'}. Va en el extremo ${west ? 'oeste, junto a los puestos mineros' : 'este, después de las estaciones de descarga'}.`, p);
+}
+// estación en apartadero (100 de ancho): desvío en x 4, vía de la estación de x 22 a 70 y vuelta a la línea en x 88
+const SX = 65;                                              // centro de la parada: el frente de la locomotora queda aquí
+export const WAGONS = [1, 2, 3, 4].map(i => SX - 3 - 7 * i); // centros de los cuatro vagones
+function stationRails(p) {
+  mains(p, 0, 100);
+  p.rails(railTurtle(4, RAIL.eb, 4).turn(1, 2).turn(-1, 2).straight(24).turn(-1, 2).turn(1, 2).pieces);
+  sigE(p, 2, CHAIN); sigE(p, 70, SIG, RAIL.siding); sigE(p, 70); sigE(p, 94); sigW(p, 50); sigW(p, 2);
+}
+function stationPiece(kind, item, label) {
+  const p = new Plan(); stationRails(p); stripSkeleton(p, 100);
+  const name = kind === 'unload' ? UNLOAD : 'Vulcano · Carga de ' + label;
+  p.raw('train-stop', SX, RAIL.siding + 2, 4, { station: name, manual_trains_limit: 1 });
+  for (const c of WAGONS) for (let x = c - 3; x < c + 3; x++) {
+    if (kind === 'unload') { p.chest(x, 32, null); p.ins(x, 33, 'S'); p.ins(x, 36, 'N'); p.chest(x, 37, null); }
+    else { p.chest(x, 32, item, 100); p.ins(x, 33, 'N'); p.ins(x, 36, 'S'); p.chest(x, 37, item, 100); }
+  }
+  if (kind === 'load') {
+    // un tren 1-4 aparcado con su horario: cargar hasta llenar, descargar hasta vaciar; reposta carbón aquí
+    const loco = p.raw('locomotive', SX - 3, RAIL.siding, 4, { items: [{ id: { name: 'coal' }, items: { in_inventory: [{ inventory: 1, stack: 0, count: 50 }] } }] });
+    for (const c of WAGONS) p.raw('cargo-wagon', c, RAIL.siding, 4);
+    p.chest(SX - 4, 32, 'coal', 50); p.ins(SX - 4, 33, 'N');
+    p.schedules = [{ locomotives: [loco.id], schedule: { records: [
+      { station: name, wait_conditions: [{ type: 'full', compare_type: 'or' }] },
+      { station: UNLOAD, wait_conditions: [{ type: 'empty', compare_type: 'or' }] },
+    ] } }];
+  }
+  const what = kind === 'unload'
+    ? `Estación de descarga para trenes 1-4 en apartadero: 48 insertadores masivos vacían los cuatro vagones en cofres de suministro pasivo y los robots llevan el mineral a la fábrica. Parada «${UNLOAD}» con límite de 1 tren; pon varias con el mismo nombre y los trenes van a la que esté libre.`
+    : `Estación de carga de ${label} para trenes 1-4 en apartadero: los robots llenan 48 cofres de solicitud con lo que sacan las perforadoras y 48 insertadores masivos cargan los vagones (${TRAIN_LOAD} unidades por tren). Trae un tren aparcado con su horario: «Carga de ${label}» hasta llenar y «Descarga» hasta vaciar; reposta carbón aquí.`;
+  return bp(kind === 'unload' ? 'Tren · Estación de descarga 1-4' : `Tren · Estación de carga 1-4 (${label})`, what + ' Señales: en cadena a la entrada del desvío y normales a la salida.', p, { w: 100 });
+}
+// puesto minero: estación de carga encima de los bloques de minería y retorno al oeste
+function outpost(B, item, label, n) {
+  const ents = [], tiles = []; let id = 1, sched = null;
+  const add = (b, ox, oy) => {
+    const q = BP.parseBlueprint(b.blueprint), map = new Map();
+    for (const e of q.ents) { map.set(e.num, id); ents.push({ id: id++, name: e.name, x: e.x + ox, y: e.y + oy, dir: e.dir, extra: e.extra }); }
+    for (const t of q.tiles) tiles.push({ x: t.x + ox, y: t.y + oy, name: t.name });
+    if (q.meta.schedules) sched = BP.mapSched(q.meta.schedules, k => map.get(k));
+  };
+  add(B.loopW, -BLOCK, 0); add(B.load[item], 0, 0);
+  for (let i = 0; i < 2; i++) add(i < n ? B.mine : B.base, BLOCK * i, BLOCK);
+  return BP.buildBlueprint({ ents, wires: [], tiles, target: 2, meta: { label: `Puesto minero de ${label}`, schedules: sched,
+    extraBp: BP.setSnap({}, { w: BLOCK, h: BLOCK, abs: true, ox: -BLOCK, oy: 0 }),
+    description: `${n === 2 ? 'Dos bloques' : 'Un bloque'} de minería con perforadoras grandes, la estación de carga de ${label} encima y el retorno al oeste. Colócalo sobre un yacimiento de ${label} y lleva su vía (sale abierta por el este) hasta la de la fábrica con tramos de línea principal y curvas: sus subestaciones le llevan también la corriente. Gasta unos ${f1(powerMW(ents))} MW. ` +
+      `Cada tren 1-4 lleva ${TRAIN_LOAD} de ${label}. Los robots del puesto llevan lo que sacan las perforadoras a la estación.` } });
+}
+
 // ----- la megabase montada: todas las piezas juntas, en proporción -----
 // Fila de arriba (de oeste a este): ciencia metalúrgica, placas de tungsteno, 2 de carburo, 4 centrales y el puerto.
 // Fila de abajo, bajo las últimas centrales y el puerto: hierro, cobre y acero para construir y exportar.
 function megabase(B) {
-  const ents = []; let id = 1;
-  const add = (b, ox, oy) => { for (const e of BP.parseBlueprint(b.blueprint).ents) ents.push({ id: id++, name: e.name, x: e.x + ox, y: e.y + oy, dir: e.dir, extra: e.extra }); };
+  const ents = [], tiles = []; let id = 1;
+  const add = (b, ox, oy) => { const q = BP.parseBlueprint(b.blueprint); for (const e of q.ents) ents.push({ id: id++, name: e.name, x: e.x + ox, y: e.y + oy, dir: e.dir, extra: e.extra }); for (const t of q.tiles) tiles.push({ x: t.x + ox, y: t.y + oy, name: t.name }); };
   const top = [B.sci, B.plate, B.carb, B.carb, B.power, B.power, B.power, B.power, B.exp], low = [[6, B.iron], [7, B.copper], [8, B.steel]];
   top.forEach((b, i) => add(b, BLOCK * i, 0)); low.forEach(([c, b]) => add(b, BLOCK * c, BLOCK));
+  // franja de tren al norte: línea de doble vía, dos estaciones de descarga y el retorno al este
+  [[B.line, 0], [B.line, 50], [B.unload, 100], [B.line, 200], [B.line, 250], [B.unload, 300], [B.line, 400], [B.loopE, 450]].forEach(([b, x]) => add(b, x, -BLOCK));
   const p = new Plan(); p.id = id;
   intake(p, 'W', 4, 0, 0); intake(p, 'E', 6, BLOCK * top.length, BLOCK);
   p.hpipe(-3, -1, BUS.acid);   // entrada del ácido de los géiseres
@@ -295,7 +408,7 @@ function megabase(B) {
   const acid = 2 * S('carb').acid + 4 * S('power').acid, gen = 4 * S('power').mw, use = powerMW(ents);
   const lavaTop = S('sci').lava + S('plate').lava, lavaLow = S('iron').lava + S('copper').lava + S('steel').lava;
   const xs = ents.map(e => Math.floor(e.x - sz(def(e.name), e.dir)[0] / 2)), ys = ents.map(e => Math.floor(e.y - sz(def(e.name), e.dir)[1] / 2));
-  const out = BP.buildBlueprint({ ents, wires: [], tiles: [], target: 2, meta: { label: 'Megabase completa (todo montado)',
+  const out = BP.buildBlueprint({ ents, wires: [], tiles, target: 2, meta: { label: 'Megabase completa (todo montado)',
     extraBp: BP.setSnap({}, { w: BLOCK, h: BLOCK, abs: true, ox: Math.min(...xs), oy: Math.min(...ys) }),
     description: [
       `Todas las piezas juntas y en proporción: ${f1(S('sci').out)} packs de ciencia metalúrgica/s (${f1(S('sci').out * 60)}/min) listos para exportar, y además ${f1(S('iron').out)} placas de hierro/s, ${f1(S('copper').out)} de cobre/s y ${f1(S('steel').out)} de acero/s para construir o vender.`,
@@ -303,7 +416,8 @@ function megabase(B) {
       `Lava: dos tomas que ya vienen en el plano, ${f1(lavaTop)}/s por el oeste de la fila de arriba (4 bombas) y ${f1(lavaLow)}/s por el este de la de abajo (6 bombas). Pon las bombas sobre un lago de lava.`,
       `Ácido sulfúrico: ${f1(acid)}/s por la tubería que asoma al oeste de la fila de arriba. Tráelo de los géiseres con bombas de extracción.`,
       `Electricidad: las 4 centrales dan ${f1(gen)} MW y el conjunto gasta unos ${f1(use)} MW a pleno rendimiento.`,
-      `Minería: los robots tienen que recibir unos ${f1(ore)} de mineral de tungsteno/s, ${f1(coal)} de carbón/s y ${f1(calcite)} de calcita/s. Pon ${Math.ceil(ore / S('mine').ore)} bloques de minería sobre tungsteno y uno sobre carbón y otro sobre calcita, y únelos a esta red con bloques base (roboport y subestaciones).`,
+      `Minería por tren: la fábrica necesita unos ${f1(ore)} de mineral de tungsteno/s, ${f1(coal)} de carbón/s y ${f1(calcite)} de calcita/s, unos ${f1((ore + coal + calcite) / TRAIN_LOAD * 60)} trenes 1-4 llenos por minuto. Usa los puestos mineros del libro (tungsteno con ${Math.ceil(ore / S('mine').ore)} bloques de minería, carbón y calcita con uno) y une su vía con la de la franja de tren.`,
+      'Trenes 1-4: al norte hay una franja de tren con línea de doble vía (circulación por la derecha), dos estaciones de descarga en apartadero que vacían los vagones en cofres para los robots, y un retorno al este. La vía sigue abierta por el oeste para llegar a los puestos mineros; para girar, usa la curva de doble vía del libro.',
       'El puerto pide además procesadores, estructuras de baja densidad y combustible de cohete para los cohetes.',
     ].join('\n') } });
   return out;
@@ -321,17 +435,20 @@ export function vulcanusBook() {
     plate: foundryBlock({ label: 'Placas de tungsteno', lava: 'molten-iron-from-lava', cast: 'tungsten-plate', molten: 10, time: 10, out: 1, unit: 'placas de tungsteno', castLabel: 'placas de tungsteno', stone: 10, nA: [1, 1], items: ['tungsten-ore'], per: [4], names: ['mineral de tungsteno'], what: 'Placas de tungsteno con mineral de tungsteno y hierro fundido.' }),
     sci: foundryBlock({ label: 'Ciencia metalúrgica', lava: 'molten-copper-from-lava', cast: 'metallurgic-science-pack', molten: 200, time: 10, out: 1, unit: 'packs de ciencia metalúrgica', castLabel: 'ciencia metalúrgica', stone: 15, nA: [5, 5], items: ['tungsten-carbide', 'tungsten-plate'], per: [3, 2], names: ['carburo de tungsteno', 'placas de tungsteno'], what: 'El producto estrella para exportar: ciencia metalúrgica con cobre fundido de la lava.' }),
     exp: exportBlock(),
+    line: linePiece(), corner: cornerPiece(), loopE: loopPiece(false), loopW: loopPiece(true), unload: stationPiece('unload'),
   };
-  const kids = [megabase(B), B.lava, B.base, B.power, B.iron, B.copper, B.steel, B.mine, B.carb, B.plate, B.sci, B.exp];
+  B.load = { 'tungsten-ore': stationPiece('load', 'tungsten-ore', 'tungsteno'), coal: stationPiece('load', 'coal', 'carbón'), calcite: stationPiece('load', 'calcite', 'calcita') };
+  const posts = [outpost(B, 'tungsten-ore', 'tungsteno', 2), outpost(B, 'coal', 'carbón', 1), outpost(B, 'calcite', 'calcita', 1)];
+  const kids = [megabase(B), ...posts, B.line, B.corner, B.loopE, B.loopW, B.unload, B.load['tungsten-ore'], B.lava, B.base, B.power, B.iron, B.copper, B.steel, B.mine, B.carb, B.plate, B.sci, B.exp];
   kids.forEach((k, i) => { k.blueprint.label = String(i).padStart(2, '0') + ' · ' + k.blueprint.label; });
   return BP.buildBook('Megabase Vulcano: superproducción y exportación', kids, 2,
-    'Pack de bloques de 50×50 con cuadrícula absoluta para Vulcano (Space Age), con robots y sin trenes. ' +
-    'El primer plano es la megabase entera ya montada; los demás son sus piezas sueltas, para ampliarla o construirla por partes. ' +
+    'Pack de bloques de 50×50 con cuadrícula absoluta para Vulcano (Space Age): robots dentro de cada zona y trenes 1-4 entre los puestos mineros y la fábrica. ' +
+    'El primer plano es la megabase entera ya montada; después vienen los puestos mineros, las piezas de tren y los bloques sueltos, para ampliarla o construirla por partes. ' +
     'Cada bloque trae roboport y subestaciones que enlazan con los vecinos, y dos troncales que lo cruzan de oeste a este: lava en la fila 24 y ácido sulfúrico en la fila 41. ' +
     'Proporción a todo gas: cada bloque de ciencia metalúrgica pide unos dos de carburo, uno de placas de tungsteno y dos de minería sobre tungsteno.');
 }
 
 /** Plantillas de serie que ofrece el editor. */
 export const PRESETS = [
-  { id: 'vulcanus', label: 'Megabase Vulcano', sub: 'Superproducción y exportación · la megabase montada y sus 11 piezas', book: vulcanusBook },
+  { id: 'vulcanus', label: 'Megabase Vulcano', sub: 'Superproducción y exportación · la megabase montada, sus puestos mineros, trenes 1-4 y piezas sueltas', book: vulcanusBook },
 ];

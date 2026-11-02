@@ -514,7 +514,9 @@ function draw() {
   c.fillStyle = TH.bg; c.fillRect(0, 0, CW, CH);
   const wx0 = V.ox, wy0 = V.oy, wx1 = V.ox + CW / s, wy1 = V.oy + CH / s;
   const SX = x => (x - V.ox) * s, SY = y => (y - V.oy) * s;
-  for (const t of S.tiles.values()) { if (t.x + 1 < wx0 || t.x > wx1 || t.y + 1 < wy0 || t.y > wy1) continue; drawTile(c, t.name, SX(t.x), SY(t.y), s); }
+  if (s < 8 && S.tiles.size > 2000) {   // de lejos, el suelo se pinta por franjas de casillas iguales: miles de rectángulos menos
+    for (const [y, runs] of tileRuns()) { if (y + 1 < wy0 || y > wy1) continue; for (const [x0, x1, name] of runs) { if (x1 + 1 < wx0 || x0 > wx1) continue; c.fillStyle = tileDef(name).color; c.fillRect(SX(x0), SY(y), (x1 - x0 + 1) * s + .6, s + .6); } }
+  } else for (const t of S.tiles.values()) { if (t.x + 1 < wx0 || t.x > wx1 || t.y + 1 < wy0 || t.y > wy1) continue; drawTile(c, t.name, SX(t.x), SY(t.y), s); }
   // rejilla
   if (showGrid) {
     if (s >= 7) { c.beginPath(); for (let x = Math.floor(wx0); x <= wx1; x++) { const X = Math.round(SX(x)) + .5; c.moveTo(X, 0); c.lineTo(X, CH); } for (let y = Math.floor(wy0); y <= wy1; y++) { const Yy = Math.round(SY(y)) + .5; c.moveTo(0, Yy); c.lineTo(CW, Yy); } c.strokeStyle = TH.grid; c.lineWidth = 1; c.stroke(); }
@@ -582,6 +584,20 @@ function draw() {
     const x0 = Math.min(P.x0, P.x1), y0 = Math.min(P.y0, P.y1), w = Math.abs(P.x1 - P.x0), h = Math.abs(P.y1 - P.y0);
     c.fillStyle = 'rgba(255,155,31,.12)'; c.fillRect(SX(x0), SY(y0), w * s, h * s); c.strokeStyle = TH.acc; c.lineWidth = 1.5; c.setLineDash([5, 4]); c.strokeRect(SX(x0) + .5, SY(y0) + .5, w * s, h * s); c.setLineDash([]);
   }
+}
+// franjas de suelo por fila [x0, x1, nombre], rehechas cuando cambia el plano
+let TRV = -1, TRC = null;
+function tileRuns() {
+  if (TRV === mmVer && TRC) return TRC;
+  const rows = new Map();
+  for (const t of S.tiles.values()) { let r = rows.get(t.y); if (!r) rows.set(t.y, r = []); r.push(t); }
+  TRC = new Map();
+  for (const [y, r] of rows) {
+    r.sort((a, b) => a.x - b.x); const out = []; let cur = null;
+    for (const t of r) { if (cur && t.name === cur[2] && t.x === cur[1] + 1) cur[1] = t.x; else out.push(cur = [t.x, t.x, t.name]); }
+    TRC.set(y, out);
+  }
+  TRV = mmVer; return TRC;
 }
 function frame(t) { navStep(t); if (dirty) { dirty = false; draw(); drawMini(); } requestAnimationFrame(frame); }
 /* ===== Interacción ===== */
@@ -1147,17 +1163,21 @@ function drawMini() {
     T = { s, ox: (W - (x1 - x0) * s) / 2 - x0 * s, oy: (H - (y1 - y0) * s) / 2 - y0 * s };
   }
   mmT = T;
-  const key = [mmVer, pw, ph, T.s.toPrecision(6), T.ox.toFixed(1), T.oy.toFixed(1)].join();
-  if (key !== mmKey) {   // el contenido solo se vuelve a pintar si cambió el plano o el encuadre
-    mmKey = key; mmBuf.width = pw; mmBuf.height = ph;
-    const b = mmBuf.getContext('2d'), { s, ox, oy } = T, m = 1 / DPR;
-    b.setTransform(DPR, 0, 0, DPR, 0, 0); b.fillStyle = TH.bg; b.fillRect(0, 0, W, H);
-    for (const t of S.tiles.values()) { b.fillStyle = tileDef(t.name).color; b.fillRect(ox + t.x * s, oy + t.y * s, Math.max(s, m), Math.max(s, m)); }
-    for (const e of S.ents.values()) if (def(e.name).kind === 'rail') drawRailBed(b, e, ox, oy, Math.min(s, 6));
-    for (const e of S.ents.values()) { const d = def(e.name); if (d.kind === 'rail') continue; const r = bb(e); b.fillStyle = d.color; b.fillRect(ox + r.x * s, oy + r.y * s, Math.max(r.w * s, m), Math.max(r.h * s, m)); }
+  // el contenido se pinta una sola vez por versión del plano, encuadrado en su caja; al mover la vista solo se reescala
+  const cb = contentBox(), pd = Math.max(1, Math.max(cb.x1 - cb.x0, cb.y1 - cb.y0) * .02), bx0 = cb.x0 - pd, by0 = cb.y0 - pd, bw = cb.x1 - cb.x0 + 2 * pd, bh = cb.y1 - cb.y0 + 2 * pd;
+  const key = [mmVer, pw, ph].join();
+  if (key !== mmKey) {
+    mmKey = key; const sc = Math.min(pw * 1.5 / bw, ph * 1.5 / bh, 12);   // píxeles por casilla del lienzo intermedio
+    mmBuf.width = Math.max(1, Math.ceil(bw * sc)); mmBuf.height = Math.max(1, Math.ceil(bh * sc));
+    const b = mmBuf.getContext('2d'), ox = -bx0 * sc, oy = -by0 * sc;
+    b.setTransform(1, 0, 0, 1, 0, 0); b.clearRect(0, 0, mmBuf.width, mmBuf.height);
+    for (const t of S.tiles.values()) { b.fillStyle = tileDef(t.name).color; b.fillRect(ox + t.x * sc, oy + t.y * sc, Math.max(sc, 1), Math.max(sc, 1)); }
+    for (const e of S.ents.values()) if (def(e.name).kind === 'rail') drawRailBed(b, e, ox, oy, Math.min(sc, 6));
+    for (const e of S.ents.values()) { const d = def(e.name); if (d.kind === 'rail') continue; const r = bb(e); b.fillStyle = d.color; b.fillRect(ox + r.x * sc, oy + r.y * sc, Math.max(r.w * sc, 1), Math.max(r.h * sc, 1)); }
   }
-  const c = mmc; c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, pw, ph); c.drawImage(mmBuf, 0, 0);
-  c.setTransform(DPR, 0, 0, DPR, 0, 0);
+  const c = mmc; c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, pw, ph);
+  c.setTransform(DPR, 0, 0, DPR, 0, 0); c.fillStyle = TH.bg; c.fillRect(0, 0, W, H);
+  c.drawImage(mmBuf, T.ox + bx0 * T.s, T.oy + by0 * T.s, bw * T.s, bh * T.s);
   const rx = T.ox + vx0 * T.s, ry = T.oy + vy0 * T.s, rw = Math.max(3, (vx1 - vx0) * T.s), rh = Math.max(3, (vy1 - vy0) * T.s);
   c.fillStyle = TH.acc; c.globalAlpha = .16; c.fillRect(rx, ry, rw, rh); c.globalAlpha = 1;
   c.strokeStyle = TH.acc; c.lineWidth = 1.5; c.strokeRect(rx + .75, ry + .75, rw - 1.5, rh - 1.5);
