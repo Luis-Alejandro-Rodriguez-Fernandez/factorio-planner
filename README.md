@@ -6,6 +6,9 @@ Funciona entero en el navegador: no hay servidor ni cuentas, y los planos que gu
 
 ## Qué puedes hacer
 
+- Tener varios planos abiertos a la vez en páginas (pestañas encima del lienzo), cada uno con su historial de deshacer, su vista y su versión de exportación. Se guardan solas en el navegador; doble clic en una pestaña cambia el nombre y Alt+← / Alt+→ cambian de página.
+- Abrir plantillas de serie para verlas y editarlas. La primera vez que entras se abre el pack **Megabase Vulcano**, un plano por página (ver más abajo).
+- Descargar el plano, todas las páginas o tu biblioteca como un archivo `.txt` con el string del juego, y abrir archivos `.txt` o `.json` con «Importar → Abrir archivo» o soltándolos sobre la ventana. Un libro se puede abrir entero en páginas.
 - Importar planos y libros de planos de Factorio 2.0 y 1.1 con Ctrl+V.
 - Construir desde cero con todos los edificios de la Factoriopedia de Factorio 2.0 y Space Age (132 piezas en la paleta), con sus tamaños reales: también vías elevadas, rampas y soportes, el vagón de artillería, coche, tanque y spidertron, los suelos de Space Age y, en «Ocultos y modo editor», cargadores, válvulas, cofres y tuberías infinitos e interfaces de energía y calor para mapas de pruebas.
 - Asignar a cada máquina solo las recetas que puede fabricar: la ensambladora ofrece las suyas, la refinería las del petróleo, la fundición las de metalurgia, etc. (326 recetas con su nombre en español). Puedes buscar por el nombre en español o el interno, asignar una receta a todas las máquinas seleccionadas a la vez y, con la pipeta (Q), seguir colocando máquinas con la misma receta. Los que mueven fluidos o calor muestran sus conexiones, y las tuberías solo se unen donde el edificio tiene una.
@@ -16,6 +19,19 @@ Funciona entero en el navegador: no hay servidor ni cuentas, y los planos que gu
 - Repetir la selección varias veces hacia cualquier lado, con la separación que quieras (Ctrl+D la repite una vez a la derecha), para teselar diseños.
 - Copiar la selección o el plano entero como un string listo para el juego.
 - Exportar para 2.0 o para 1.1, con nombres, direcciones, módulos y cables traducidos.
+
+## Pack «Megabase Vulcano»
+
+Un libro de planos para Vulcano (Space Age) pensado para producir y exportar a lo grande, con robots y sin trenes. Son bloques de 50×50 con cuadrícula absoluta que encajan entre sí:
+
+- Cada bloque trae un roboport (su zona logística cubre justo el bloque, así que las redes se unen al teselar) y nueve subestaciones que se cablean con las del bloque vecino.
+- Dos troncales cruzan todos los bloques de oeste a este: lava en la fila 24 y ácido sulfúrico en la fila 41. Los bloques que no las usan las pasan por debajo con tuberías subterráneas, y ninguna otra tubería llega al borde, así que los fluidos de bloques vecinos no se mezclan.
+- Bloques: toma de lava, base vacía, central de vapor (99 turbinas, ~576 MW con neutralización de ácido), fundición de hierro y de cobre (~194 placas/s cada una), acero por colada (~97/s), minería con perforadoras grandes, carbono y carburo de tungsteno, placas de tungsteno, ciencia metalúrgica (~27 packs/s) y un puerto de exportación con 4 silos de cohetes.
+- Las coladas llevan módulos de productividad 3 y una fila de balizas con velocidad 3; las fundiciones de lava, las perforadoras y los silos llevan velocidad 3. Cada plano explica en su descripción qué consume y qué produce, con cifras sacadas de las recetas del juego.
+
+Los procesadores y el combustible de cohete del puerto de exportación no se fabrican en el pack: suelen llegar de otro planeta.
+
+El pack se genera en `src/core/presets.js`. `tests/presets.test.js` comprueba cada plano: que nada se solape, que cada máquina pueda fabricar su receta, que todo tenga corriente, que cada insertador coja de un sitio y deje en otro en el sentido correcto, que las perforadoras echen en un cofre, que ninguna red de tuberías mezcle fluidos y que cada entrada de fluido reciba el suyo.
 
 ## Arranque rápido
 
@@ -29,7 +45,7 @@ npm run dev      # abre http://localhost:5173
 | Comando | Qué hace |
 | --- | --- |
 | `npm run dev` | Servidor de desarrollo que recarga al guardar |
-| `npm test` | Pruebas del códec de strings, de los libros de planos y de la geometría de vías |
+| `npm test` | Pruebas del códec de strings, de los libros de planos, de la geometría de vías y del pack de Vulcano |
 | `npm run build` | Genera la versión de producción en `dist/` |
 | `npm run preview` | Sirve `dist/` para revisarla antes de publicar |
 
@@ -94,6 +110,7 @@ src/editor.js           Lienzo, herramientas, paneles y portapapeles
 src/core/blueprint.js   Códec de strings y conversión entre 1.1 y 2.0
 src/core/rails.js       Geometría de las vías de 2.0
 src/core/gamedata.js    Edificios, máquinas y recetas sacados del juego (generado)
+src/core/presets.js     Plantillas de serie: el pack Megabase Vulcano
 scripts/                Generador de gamedata.js
 tests/                  Pruebas con Vitest
 public/favicon.svg      Icono
@@ -117,7 +134,8 @@ Los tamaños de los edificios y la posición de sus conexiones de tubería y cal
 - Los hornos (de piedra, acero, eléctrico) y la recicladora no tienen receta en el plano: en el juego la eligen solos.
 - Las curvas y las diagonales son de Factorio 2.0. Al exportar para 1.1, el editor avisa de que esa versión no las reconoce.
 - Las vías elevadas se trazan con el planificador, pero no empalman solas con las rampas: coloca la rampa a mano en su sitio. Las medias diagonales no están en la paleta; si vienen en un plano importado, se muestran y se conservan al exportar.
-- «Mis planos» se guarda en el navegador. Para tener una copia o llevarla a otro equipo, usa «Copiar todo como libro» e impórtalo allí con «Importar libro».
+- «Mis planos» y las páginas se guardan en el navegador. Para tener una copia o llevarla a otro equipo, descárgalas (botón «Descargar» de Mis planos o el de la barra de páginas) y ábrelas allí con «Importar → Abrir archivo».
+- El pack de Vulcano se ha comprobado con las reglas del juego que conoce el editor (tamaños, recetas, conexiones de fluidos, alcance de subestaciones y balizas), no dentro de Factorio. Si algo no encaja en tu partida, ajústalo aquí y vuelve a exportarlo.
 
 ## Contribuir
 

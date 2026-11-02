@@ -15,13 +15,20 @@
     <div><h1>Blueprinter</h1><p>Editor de planos de Factorio: pega, modela y copia</p></div>
   </div>
   <div class="tb">
-    <button class="btn" id="b-new" title="Empezar un plano vacío">Nuevo</button>
-    <button class="btn" id="b-import" title="Importar un string de plano (también puedes pulsar Ctrl+V sobre el lienzo)">Importar</button>
+    <button class="btn" id="b-new" title="Abrir una página nueva con un plano vacío">Nuevo</button>
+    <button class="btn" id="b-tmpl" title="Planos de serie listos para ver y editar, como el pack de megabase para Vulcano">Plantillas</button>
+    <button class="btn" id="b-import" title="Importar un string o un archivo de plano (también puedes pulsar Ctrl+V sobre el lienzo o soltar un archivo)">Importar</button>
     <button class="btn primary" id="b-copy" title="Copiar el plano completo como string para Factorio">Copiar<span class="hide-m"> string</span></button>
     <button class="btn" id="b-help" title="Atajos de teclado" aria-label="Atajos de teclado">?</button>
     <button class="btn only-m" id="b-side" aria-controls="side">Panel</button>
   </div>
 </header>
+
+<nav class="pages" aria-label="Páginas abiertas">
+  <div class="ptabs" id="ptabs" role="tablist" aria-label="Páginas"></div>
+  <button class="pbtn" id="pg-add" title="Página nueva (también con «Nuevo»)" aria-label="Página nueva">+</button>
+  <button class="pbtn" id="pg-down" title="Descargar todas las páginas como un libro de planos (.txt)" aria-label="Descargar todas las páginas"><svg viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg></button>
+</nav>
 
 <div class="app">
   <aside class="palette" aria-label="Paleta de entidades">
@@ -52,7 +59,7 @@
     <div class="empty" id="empty" hidden>
       <div class="ecard">
         <p><b>Lienzo en blanco.</b> No hace falta ningún plano: elige una pieza en la paleta y haz clic en la cuadrícula para empezar. Si ya tienes uno en Factorio, pégalo con <kbd>Ctrl</kbd>+<kbd>V</kbd>.</p>
-        <div class="row"><button class="btn small" id="e-import">Pegar un string</button><button class="btn small" id="e-example">Ver un ejemplo</button></div>
+        <div class="row"><button class="btn small" id="e-import">Pegar un string</button><button class="btn small" id="e-tmpl">Ver plantillas</button><button class="btn small" id="e-example">Ver un ejemplo</button></div>
       </div>
     </div>
     <canvas class="mini" id="mm" hidden title="Minimapa: haz clic o arrastra para mover la vista (M lo oculta)" aria-label="Minimapa del plano"></canvas>
@@ -70,7 +77,7 @@
       <div class="field"><span>Cuadrícula de ajuste (city blocks)</span>
         <div class="row"><input class="inp num" id="bp-gw" type="number" min="0" max="10000" step="1" placeholder="Ancho" aria-label="Ancho de la cuadrícula"><span aria-hidden="true">×</span><input class="inp num" id="bp-gh" type="number" min="0" max="10000" step="1" placeholder="Alto" aria-label="Alto de la cuadrícula"><label class="chk" title="El plano se alinea con la cuadrícula del mundo, no con el cursor"><input type="checkbox" id="bp-gabs"> Absoluta</label></div>
       </div>
-      <div class="row"><button class="btn primary" id="s-copy">Copiar string</button><button class="btn" id="s-export">Ver string y JSON</button></div>
+      <div class="row"><button class="btn primary" id="s-copy">Copiar string</button><button class="btn" id="s-export">Ver string y JSON</button><button class="btn" id="s-down" title="Guardar el plano en un archivo .txt con el string del juego">Descargar</button></div>
       <p class="hint" id="bp-src"></p>
     </section>
     <section class="sec">
@@ -86,7 +93,7 @@
       <div class="row"><button class="btn" id="lib-save" title="Guardar el plano completo">Guardar plano</button><button class="btn" id="lib-save-sel" title="Guardar solo lo seleccionado como fragmento reutilizable (Ctrl+B)" disabled>Guardar selección</button></div>
       <input class="inp" id="lib-q" type="search" placeholder="Buscar en mis planos…" autocomplete="off" aria-label="Buscar en mis planos" style="margin-top:8px">
       <div id="lib-list"></div>
-      <div class="row" style="margin-top:10px"><button class="btn small" id="lib-book" title="Copia toda la biblioteca como un libro de planos, con una subcarpeta por carpeta">Copiar todo como libro</button><button class="btn small" id="lib-import" title="Pega un libro de planos y guárdalo entero aquí">Importar libro</button></div>
+      <div class="row" style="margin-top:10px"><button class="btn small" id="lib-book" title="Copia toda la biblioteca como un libro de planos, con una subcarpeta por carpeta">Copiar todo como libro</button><button class="btn small" id="lib-down" title="Descarga toda la biblioteca como un libro de planos (.txt): sirve de copia de seguridad">Descargar</button><button class="btn small" id="lib-import" title="Pega o abre un libro de planos y guárdalo entero aquí">Importar libro</button></div>
     </section>
   </aside>
 </div>
@@ -95,13 +102,13 @@
   <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="mi-t">
     <header><h2 id="mi-t">Importar plano</h2><button class="xbtn" data-close aria-label="Cerrar">×</button></header>
     <div class="body">
-      <p class="hint" style="margin:0">Pega un string de plano o de libro de planos (empieza por <code>0eN</code>). También acepta el JSON descomprimido.</p>
+      <p class="hint" style="margin:0">Pega un string de plano o de libro de planos (empieza por <code>0eN</code>), o abre un archivo <code>.txt</code> o <code>.json</code>. También acepta el JSON descomprimido.</p>
       <textarea id="imp-text" class="code" spellcheck="false" placeholder="0eNqd…"></textarea>
       <div id="imp-sum" class="ok"></div>
       <ul class="book" id="imp-book" hidden></ul>
       <div class="err" id="imp-err"></div>
     </div>
-    <footer><button class="btn" id="imp-paste">Pegar del portapapeles</button><button class="btn" id="imp-lib" hidden title="Guardar todos los planos del libro en Mis planos">Guardar libro en Mis planos</button><span class="grow"></span><button class="btn" id="imp-hold" title="Llevarlo en el cursor para colocarlo donde quieras">Colocar con el cursor</button><button class="btn primary" id="imp-open">Abrir</button></footer>
+    <footer><button class="btn" id="imp-paste">Pegar del portapapeles</button><button class="btn" id="imp-file" title="Abrir un archivo .txt o .json con un plano o un libro">Abrir archivo…</button><button class="btn" id="imp-pages" hidden title="Abrir cada plano del libro en su propia página">Abrir todo en páginas</button><button class="btn" id="imp-lib" hidden title="Guardar todos los planos del libro en Mis planos">Guardar libro en Mis planos</button><span class="grow"></span><button class="btn" id="imp-hold" title="Llevarlo en el cursor para colocarlo donde quieras">Colocar con el cursor</button><button class="btn primary" id="imp-open">Abrir</button></footer>
   </div>
 </div>
 
@@ -113,7 +120,7 @@
       <div id="ex-json" hidden><textarea id="ex-jtext" class="code" spellcheck="false"></textarea><p class="hint">Puedes editar el JSON y pulsar «Aplicar JSON» para cargarlo en el lienzo.</p></div>
       <div class="err" id="ex-err"></div>
     </div>
-    <footer><span class="hint" id="ex-info" style="margin:0"></span><span class="grow"></span><button class="btn" id="ex-apply" hidden>Aplicar JSON</button><button class="btn primary" id="ex-copy">Copiar</button></footer>
+    <footer><span class="hint" id="ex-info" style="margin:0"></span><span class="grow"></span><button class="btn" id="ex-apply" hidden>Aplicar JSON</button><button class="btn" id="ex-down">Descargar</button><button class="btn primary" id="ex-copy">Copiar</button></footer>
   </div>
 </div>
 
@@ -136,6 +143,8 @@
         <dt><kbd>T</kbd></dt><dd>Cambiar entrada o salida en cintas subterráneas</dd>
         <dt><kbd>Ctrl</kbd>+<kbd>C</kbd> · <kbd>X</kbd> · <kbd>V</kbd></dt><dd>Copiar, cortar y pegar. Lo copiado ya es un string válido para Factorio, y puedes pegar strings del juego directamente</dd>
         <dt><kbd>Ctrl</kbd>+<kbd>S</kbd></dt><dd>Copiar el plano completo como string</dd>
+        <dt>Páginas</dt><dd>Cada pestaña de arriba es un plano abierto, con su propio historial y su vista. «+» o «Nuevo» abren una vacía, doble clic en el nombre lo cambia y × la cierra. Se guardan solas en este navegador. <kbd>Alt</kbd>+<kbd>←</kbd> <kbd>→</kbd> cambian de página</dd>
+        <dt>Archivos</dt><dd>«Descargar» guarda el plano, las páginas o tu biblioteca en un .txt con el string del juego. Para abrir uno, suéltalo sobre la ventana o usa «Importar → Abrir archivo»</dd>
         <dt><kbd>Ctrl</kbd>+<kbd>B</kbd></dt><dd>Guardar la selección como fragmento en «Mis planos». Desde ahí, «Colocar» la lleva en el cursor para reutilizarla</dd>
         <dt><kbd>Ctrl</kbd>+<kbd>D</kbd></dt><dd>Repetir la selección a la derecha (en el panel puedes elegir cuántas veces, hacia dónde y con qué separación)</dd>
         <dt><kbd>Mayús</kbd>+clic</dt><dd>Al pegar, reemplazar lo que choque. Al seleccionar, añadir o quitar</dd>
@@ -146,6 +155,13 @@
       </dl>
       <p class="hint">Las entidades se dibujan con formas propias (sin los gráficos del juego). Al importar se conservan recetas, módulos, filtros y cables, y se vuelven a numerar al exportar.</p>
     </div>
+  </div>
+</div>
+
+<div class="modal" id="m-tmpl" hidden>
+  <div class="dialog wide" role="dialog" aria-modal="true" aria-labelledby="mt-t">
+    <header><h2 id="mt-t">Plantillas</h2><button class="xbtn" data-close aria-label="Cerrar">×</button></header>
+    <div class="body" id="tm-body"></div>
   </div>
 </div>
 
@@ -175,6 +191,8 @@
 
 <div class="toasts" id="toasts" aria-live="polite"></div>
 <datalist id="dl-folders"></datalist>
+<input type="file" id="file-in" accept=".txt,.json,text/plain,application/json" hidden>
+<div class="drop" id="drop" hidden><div>Suelta el archivo para abrirlo</div></div>
 <script type="module" src="/src/main.js"></script>
 </body>
 </html>

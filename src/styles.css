@@ -67,6 +67,36 @@ kbd{font:600 12px var(--ui);padding:1px 6px;border-radius:4px;background:var(--b
 .btn.small{padding:4px 9px;font-size:13px}
 .btn:disabled{opacity:.45;cursor:default}
 
+/* páginas */
+.pages{display:flex;align-items:stretch;gap:4px;padding:4px 8px 0;background:var(--panel-2);border-bottom:1px solid var(--line);min-width:0}
+.ptabs{display:flex;gap:2px;overflow-x:auto;min-width:0;flex:0 1 auto;scrollbar-width:thin}
+.ptab{display:flex;align-items:center;gap:6px;flex:none;max-width:220px;padding:5px 4px 5px 11px;border:1px solid var(--line);border-bottom:0;border-radius:6px 6px 0 0;background:var(--btn-lo);color:var(--muted);cursor:pointer;font-size:13.5px;font-weight:600;line-height:1.2;user-select:none}
+.ptab:hover{color:var(--text);background:var(--btn)}
+.ptab.on{background:var(--panel);color:var(--text);box-shadow:inset 0 2px 0 var(--accent);position:relative;top:1px}
+.ptab .pt{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ptab small{font-weight:400;color:var(--muted);font-variant-numeric:tabular-nums}
+.ptab .px{border:0;background:transparent;color:var(--muted);font-size:16px;line-height:1;padding:1px 5px;border-radius:4px;cursor:pointer}
+.ptab .px:hover{background:var(--btn-hi);color:var(--danger)}
+.ptab input{width:150px;padding:1px 5px;font:inherit;border:1px solid var(--accent);border-radius:4px;background:var(--inset)}
+.pbtn{flex:none;align-self:center;width:30px;height:28px;display:grid;place-items:center;border:1px solid transparent;border-radius:6px;background:transparent;color:var(--text);font-size:19px;line-height:1;cursor:pointer}
+.pbtn:hover{background:var(--btn);border-color:var(--line-2)}
+.pbtn svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+
+/* plantillas */
+.dialog.wide{width:min(860px,100%)}
+.tcard{border:1px solid var(--line);border-radius:8px;background:var(--panel-2);padding:12px 14px;display:flex;flex-direction:column;gap:8px}
+.tcard h3{margin:0;font-size:17px}
+.tcard h3 small{font-weight:400;font-size:13px;color:var(--muted);margin-left:6px}
+.tcard>p{margin:0;font-size:14px;line-height:1.45}
+.tlist{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:6px}
+.tlist li{display:grid;grid-template-columns:56px 1fr;gap:4px 10px;align-items:center;padding:7px;border:1px solid var(--line);border-radius:6px;background:var(--inset)}
+.tlist canvas{width:56px;height:56px;grid-row:span 2;border-radius:4px;background:var(--cv-bg);box-shadow:inset 0 0 0 1px var(--line)}
+.tlist b{font-size:14px;line-height:1.25}
+.tlist small{display:block;color:var(--muted);font-size:12.5px;font-weight:400}
+.tlist .row{gap:4px}
+.drop{position:fixed;inset:0;z-index:70;display:grid;place-items:center;background:rgba(12,10,8,.55);pointer-events:none}
+.drop div{padding:22px 30px;border:2px dashed var(--accent);border-radius:12px;background:var(--panel);font-size:18px;font-weight:700}
+
 .app{flex:1;min-height:0;display:grid;grid-template-columns:236px minmax(0,1fr) 316px}
 
 /* paleta */
@@ -208,6 +238,7 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
   .chip{top:auto;bottom:34px;left:10px}
   .empty{padding-left:12px;bottom:34px}
   .mini{width:150px;height:104px;bottom:30px}
+  .ptab{max-width:160px}
 }
 @media (max-width:540px){
   .brand>div:not(.logo){display:none}

@@ -1,4 +1,5 @@
 import { BP } from './core/blueprint.js';
+import { PRESETS } from './core/presets.js';
 import { HV, rotQ, normDir, railKey, railEndsOf, tmplVariants, tmplMQ, tmplPieces, tmplEnds, slotsAtEnd, railMoves, planRails } from './core/rails.js';
 
 /* ===== Editor: estado, historial, índice y dibujo ===== */
@@ -1039,6 +1040,7 @@ window.addEventListener('keydown', e => {
   if (e.key === 'Escape') { const m = document.querySelector('.modal:not([hidden])'); if (m) { closeModal(m); return; } }
   if (typing(e.target) || modalOpen()) return;
   const k = e.key.toLowerCase(), mod = e.ctrlKey || e.metaKey;
+  if (e.altKey && !mod && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) { e.preventDefault(); stepPage(e.key === 'ArrowLeft' ? -1 : 1); return; }
   if (mod) {
     if (k === 'c' || k === 'x') {
       if (sel.size || selT.size) { const g = selGroup(); clip = g; armClip(k === 'x' ? 'cut' : 'copy', groupString(g), g.ents.length); }
@@ -1178,7 +1180,7 @@ function toast(msg, kind, ms) {
   setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 300); }, ms || (kind === 'err' ? 5000 : 2800));
 }
 let panelT = 0, saveT = 0, selT_ = 0;
-function changed() { idxDirty = true; dirty = true; clearTimeout(panelT); panelT = setTimeout(() => { renderSel(); renderContents(); }, 60); clearTimeout(saveT); saveT = setTimeout(saveDraft, 900); updateEmpty(); updateStatus(); }
+function changed() { idxDirty = true; dirty = true; clearTimeout(panelT); panelT = setTimeout(() => { renderSel(); renderContents(); renderPages(); }, 60); clearTimeout(saveT); saveT = setTimeout(saveDraft, 900); updateEmpty(); updateStatus(); }
 function renderSelSoon() { clearTimeout(selT_); selT_ = setTimeout(renderSel, 50); }
 function updateEmpty() { $('#empty').hidden = !!(S.ents.size || S.tiles.size || mode !== 'select'); }
 function updateStatus() {
@@ -1428,11 +1430,14 @@ function importObject(obj, how, srcText) {
 function loadBp(bp, how) {
   const parsed = BP.parseBlueprint(bp);
   if (!parsed.ents.length && !parsed.tiles.length) return toast('El plano no tiene entidades ni suelos', 'warn');
-  if (how === 'hold') holdGroup(instantiate(parsed), `«${parsed.meta.label || 'Plano'}» en el cursor (${parsed.ents.length} entidades): clic para colocarlo, Mayús+clic reemplaza, Esc lo suelta.`);
-  else { openParsed(parsed); toast(`Abierto «${parsed.meta.label || 'Plano sin nombre'}»: ${parsed.ents.length} entidades, versión ${BP.verStr(parsed.meta.version)}`, 'ok'); }
+  if (how === 'hold') return holdGroup(instantiate(parsed), `«${parsed.meta.label || 'Plano'}» en el cursor (${parsed.ents.length} entidades): clic para colocarlo, Mayús+clic reemplaza, Esc lo suelta.`);
+  const fresh = how !== 'replace' && !isEmptyS();   // si la página actual tiene algo, se abre en otra página
+  if (fresh) addPage(null);
+  openParsed(parsed); renderPages(); saveDraft();
+  toast(`Abierto «${parsed.meta.label || 'Plano sin nombre'}»${fresh ? ' en una página nueva' : ''}: ${parsed.ents.length} entidades, versión ${BP.verStr(parsed.meta.version)}`, 'ok');
 }
 function showBook(list, how, label) {
-  const ul = $('#imp-book'); pendingBook = { list, label: label || 'Libro importado' }; ul.hidden = false; $('#imp-lib').hidden = false;
+  const ul = $('#imp-book'); pendingBook = { list, label: label || 'Libro importado' }; ul.hidden = false; $('#imp-lib').hidden = false; $('#imp-pages').hidden = false;
   ul.innerHTML = list.map((it, i) => `<li><span title="${esc(it.label)}">${esc(it.label)}</span><small class="hint" style="margin:0">${it.n} ent.</small><button class="btn small" data-h="${i}">Al cursor</button><button class="btn small primary" data-o="${i}">Abrir</button></li>`).join('');
   ul.querySelectorAll('button').forEach(b => b.onclick = () => { const it = list[+(b.dataset.o ?? b.dataset.h)]; closeModal($('#m-import')); loadBp(it.bp, b.dataset.o != null ? 'open' : 'hold'); });
   $('#imp-sum').textContent = `Libro de planos con ${list.length} planos. Elige cuál abrir:`; $('#imp-err').textContent = '';
@@ -1440,7 +1445,7 @@ function showBook(list, how, label) {
 let impT = 0;
 function checkImport() {
   clearTimeout(impT); impT = setTimeout(async () => {
-    const t = $('#imp-text').value; $('#imp-book').hidden = true; $('#imp-lib').hidden = true; pendingBook = null; $('#imp-err').textContent = ''; $('#imp-sum').textContent = '';
+    const t = $('#imp-text').value; $('#imp-book').hidden = true; $('#imp-lib').hidden = true; $('#imp-pages').hidden = true; pendingBook = null; $('#imp-err').textContent = ''; $('#imp-sum').textContent = '';
     if (!t.trim()) return;
     try { const o = await BP.decode(t);
       if (o.blueprint_book) return showBook(BP.flattenBook(o.blueprint_book), 'open', o.blueprint_book.label);
@@ -1458,6 +1463,8 @@ async function doImport(how) {
 }
 $('#imp-open').onclick = () => doImport('open');
 $('#imp-lib').onclick = () => { if (pendingBook && pendingBook.list.length) openSave('book', pendingBook); };
+$('#imp-pages').onclick = async () => { if (!pendingBook || !pendingBook.list.length) return; closeModal($('#m-import')); await openBookPages(pendingBook.list); };
+$('#imp-file').onclick = () => $('#file-in').click();
 $('#imp-hold').onclick = () => doImport('hold');
 $('#imp-paste').onclick = async () => {
   try { const t = await navigator.clipboard.readText(); $('#imp-text').value = t; checkImport(); }
@@ -1465,11 +1472,11 @@ $('#imp-paste').onclick = async () => {
 };
 
 // ----- exportar -----
-function fullBp() {
+function fullBp(T) {
   S.meta.label = $('#bp-label').value.trim(); S.meta.description = $('#bp-desc').value.trim();
   const ents = [...S.ents.values()], tiles = [...S.tiles.values()];
   const meta = Object.assign({}, S.meta, { extraBp: snapExtra(S.meta.extraBp, BP.getSnap(S.meta.extraBp), { ents, tiles }) });
-  return BP.buildBlueprint({ ents, wires: S.wires, tiles, meta, target: S.target });
+  return BP.buildBlueprint({ ents, wires: S.wires, tiles, meta, target: T || S.target });
 }
 function rails20() { let n = 0; for (const e of S.ents.values()) { const d = def(e.name); if (d.kind === 'rail' && (d.rt !== 'S' || e.dir % 4 === 2 || d.elev)) n++; } return n; }
 async function copyAll() {
@@ -1492,7 +1499,7 @@ let exTab = 'str';
 function setTab(t) { exTab = t; document.querySelectorAll('#m-export [data-tab]').forEach(b => b.classList.toggle('on', b.dataset.tab === t)); $('#ex-str').hidden = t !== 'str'; $('#ex-json').hidden = t !== 'json'; $('#ex-apply').hidden = t !== 'json'; $('#ex-copy').textContent = t === 'json' ? 'Copiar JSON' : 'Copiar string'; }
 document.querySelectorAll('#m-export [data-tab]').forEach(b => b.onclick = () => setTab(b.dataset.tab));
 $('#ex-copy').onclick = async () => { const ta = exTab === 'json' ? $('#ex-jtext') : $('#ex-text'); const ok = await writeClip(ta.value); if (!ok) { ta.focus(); ta.select(); } toast(ok ? 'Copiado al portapapeles' : 'Selecciona el texto y pulsa Ctrl+C', ok ? 'ok' : 'warn'); };
-$('#ex-apply').onclick = () => { try { const o = JSON.parse($('#ex-jtext').value); closeModal($('#m-export')); importObject(o, 'open'); } catch (e) { $('#ex-err').textContent = 'JSON no válido: ' + e.message; } };
+$('#ex-apply').onclick = () => { try { const o = JSON.parse($('#ex-jtext').value); closeModal($('#m-export')); importObject(o, 'replace'); } catch (e) { $('#ex-err').textContent = 'JSON no válido: ' + e.message; } };
 
 // ----- modales -----
 let lastFocus = null;
@@ -1541,7 +1548,7 @@ function libMeta(it) {
 function renderLib() {
   const root = $('#lib-list'), q = norm($('#lib-q').value.trim());
   $('#dl-folders').innerHTML = libFolders().filter(Boolean).map(f => `<option value="${esc(f)}">`).join('');
-  $('#lib-book').disabled = !lib.length;
+  $('#lib-book').disabled = $('#lib-down').disabled = !lib.length;
   if (!lib.length) { root.innerHTML = '<p class="hint">Aún no has guardado nada. Selecciona una parte de tu diseño y pulsa «Guardar selección» para tenerla a mano como fragmento.</p>'; return; }
   const view = lib.filter(it => !q || norm(it.name + ' ' + (it.folder || '')).includes(q));
   if (!view.length) { root.innerHTML = '<p class="hint">Nada coincide con la búsqueda.</p>'; return; }
@@ -1564,7 +1571,7 @@ $('#lib-list').addEventListener('click', async e => {
   if (!b) { const was = li.classList.contains('open'); $('#lib-list').querySelectorAll('li.open').forEach(x => x.classList.remove('open')); li.classList.toggle('open', !was); return; }
   const a = b.dataset.a;
   if (a === 'hold' || a === 'open') {
-    try { const o = await BP.decode(it.str); if (!o.blueprint) throw new Error('No contiene un plano'); if (a === 'open' && (S.ents.size || S.tiles.size) && !(await askConfirm(`¿Abrir «${it.name}»?`, 'Sustituye lo que hay en el lienzo. Si solo quieres añadirlo, usa «Colocar».', 'Abrir'))) return; loadBp(o.blueprint, a); }
+    try { const o = await BP.decode(it.str); if (!o.blueprint) throw new Error('No contiene un plano'); loadBp(o.blueprint, a); }
     catch (err) { toast(err.message, 'err'); }
     $('#side').classList.remove('open'); return;
   }
@@ -1580,8 +1587,8 @@ function libAdd(items) {
   lib = prev; toast('No se pudo guardar: el navegador no tiene más sitio o no permite guardar datos aquí. Borra algún plano o copia el string para conservarlo.', 'warn', 6000); return false;
 }
 // libro de planos: con folders, una subcarpeta por carpeta
-async function copyBook(items, label, folders) {
-  if (!items.length) return toast('No hay planos que copiar', 'warn');
+async function copyBook(items, label, folders, download) {
+  if (!items.length) return toast(download ? 'No hay planos que descargar' : 'No hay planos que copiar', 'warn');
   const bpOf = async it => { try { const o = await BP.decode(it.str); return o.blueprint ? { blueprint: Object.assign({}, o.blueprint, { label: it.name }) } : null; } catch (e) { return null; } };
   const kids = [];
   if (folders) {
@@ -1591,11 +1598,14 @@ async function copyBook(items, label, folders) {
       if (f) kids.push(BP.buildBook(f, bps, S.target)); else kids.push(...bps);
     }
   } else kids.push(...(await Promise.all(items.map(bpOf))).filter(Boolean));
-  const ok = await writeClip(BP.encodeSync(BP.buildBook(label, kids, S.target)));
+  const str = BP.encodeSync(BP.buildBook(label, kids, S.target));
+  if (download) return downloadText(label, str, `Libro «${label}» descargado (${items.length} planos). Ábrelo aquí con «Importar → Abrir archivo» o pega su contenido en Factorio.`);
+  const ok = await writeClip(str);
   toast(ok ? `Libro «${label}» copiado (${items.length} planos, para Factorio ${S.target === 1 ? '1.1' : '2.0'}). En el juego: «Importar cadena».` : 'El navegador bloqueó el portapapeles', ok ? 'ok' : 'warn', 4500);
 }
 $('#lib-book').onclick = () => copyBook(lib, 'Mis planos', true);
-$('#lib-import').onclick = () => { openModal('m-import'); $('#imp-text').value = ''; checkImport(); toast('Pega un libro de planos y pulsa «Guardar libro en Mis planos»'); };
+$('#lib-down').onclick = () => copyBook(lib, 'Mis planos', true, true);
+$('#lib-import').onclick = () => { openModal('m-import'); $('#imp-text').value = ''; checkImport(); toast('Pega o abre un libro de planos y pulsa «Guardar libro en Mis planos»'); };
 
 // ----- diálogo de guardado: plano completo, selección (fragmento), edición o libro importado -----
 let SV = null;
@@ -1654,8 +1664,193 @@ $('#sv-ok').onclick = async () => {
 $('#m-save').addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.tagName === 'INPUT' && e.target.type !== 'checkbox') { e.preventDefault(); $('#sv-ok').click(); } });
 $('#lib-save').onclick = () => openSave('plan');
 $('#lib-save-sel').onclick = () => openSave('sel');
-async function saveDraft() { try { if (!S.ents.size && !S.tiles.size) { localStorage.removeItem('bpr.draft'); return; } LS.set('bpr.draft', await BP.encode(fullBp())); } catch (e) { } }
+function saveDraft() { clearTimeout(saveT); savePages(); }
 function renderBpSrc() { $('#bp-src').textContent = S.meta.version ? `Importado de Factorio ${BP.verStr(S.meta.version)}.${S.meta.scheme !== S.target ? ' Al convertir de versión se traducen nombres y direcciones; revisa filtros y combinadores.' : ''}` : 'Si ya lo usas en el juego, elige la misma versión que tengas instalada.'; }
+
+// ----- páginas: varios planos abiertos a la vez, cada uno con su historial, su vista y su versión de exportación -----
+// La página activa vive en S; las demás guardan su string (y, mientras dura la sesión, su estado con el historial).
+// Todas se guardan en este navegador (bpr.pages) y vuelven al recargar.
+let pages = [], pageCur = null, pageSeq = 0, pageRenaming = false, pageWarned = false, pageOnId = null;
+const pageId = () => 'pg' + Date.now().toString(36) + (pageSeq++).toString(36);
+function isEmptyS() { return !S.ents.size && !S.tiles.size; }
+function detach() { S.ents = new Map(); S.tiles = new Map(); S.wires = []; S.nextId = 1; S.meta = newMeta(); UNDO.length = 0; REDO.length = 0; TX = null; sel.clear(); selT.clear(); idxDirty = true; dirty = true; }
+function writePage(pg) {
+  S.meta.label = $('#bp-label').value.trim(); S.meta.description = $('#bp-desc').value.trim();
+  Object.assign(pg, { label: S.meta.label, n: S.ents.size, target: S.target, ver: S.meta.version, view: { ox: V.ox, oy: V.oy, s: V.s } });
+  pg.str = isEmptyS() ? '' : BP.encodeSync(fullBp(2));   // siempre en 2.0 para no perder nada; la versión de exportación va aparte
+}
+function stashPage() {
+  const pg = pageCur; if (!pg) return;
+  if (TX) txCommit(); RP = null; P = null; if (mode === 'hold' || mode === 'place') setMode('select');
+  writePage(pg);
+  pg.live = { ents: S.ents, tiles: S.tiles, wires: S.wires, nextId: S.nextId, meta: S.meta, target: S.target, undo: UNDO.slice(), redo: REDO.slice() };
+  detach();
+}
+async function showPage(pg) {
+  pageCur = pg; detach();
+  if (pg.live) {
+    const L = pg.live; pg.live = null;
+    Object.assign(S, { ents: L.ents, tiles: L.tiles, wires: L.wires, nextId: L.nextId, meta: L.meta, target: L.target }); UNDO.push(...L.undo); REDO.push(...L.redo);
+    $('#bp-target').value = String(S.target); $('#bp-label').value = S.meta.label || ''; $('#bp-desc').value = S.meta.description || '';
+    renderSnap(); setMode('select'); changed(); renderBpSrc();
+  } else {
+    let parsed = null;
+    if (pg.str) { try { const o = await BP.decode(pg.str); if (o.blueprint) parsed = BP.parseBlueprint(o.blueprint); } catch (e) { toast(`No se pudo abrir la página «${pg.label || 'Sin nombre'}»: ${e.message}`, 'err'); } }
+    if (pageCur !== pg) return;   // mientras tanto se eligió otra página
+    openParsed(parsed || { ents: [], tiles: [], wires: [], meta: newMeta() });
+    if (pg.target) S.target = pg.target; if ('ver' in pg) S.meta.version = pg.ver;
+    $('#bp-target').value = String(S.target); renderBpSrc();
+  }
+  if (pg.view) { V.ox = pg.view.ox; V.oy = pg.view.oy; V.s = clamp(pg.view.s || 32, 2, 128); }
+  hover.inside = false; dirty = true; updateStatus(); renderPages();
+}
+function savePages() {
+  if (!pageCur) return;
+  try { writePage(pageCur); } catch (e) { }
+  const ok = LS.set('bpr.pages', { v: 1, active: pages.indexOf(pageCur), list: pages.map(p => ({ id: p.id, label: p.label || '', str: p.str || '', view: p.view || null, n: p.n || 0, target: p.target || 2, ver: p.ver ?? null })) });
+  if (!ok && !pageWarned) { pageWarned = true; toast('No se pudieron guardar las páginas en este navegador (no queda sitio o no deja guardar). Descárgalas con el botón de la barra de páginas para no perderlas.', 'warn', 7000); }
+  try { localStorage.removeItem('bpr.draft'); } catch (e) { }
+  renderPages();
+}
+// crea una página vacía detrás de la actual y la deja activa (sin dibujar nada aún)
+function addPage() {
+  stashPage();
+  const pg = { id: pageId(), label: '', str: '', n: 0 }, at = pageCur ? pages.indexOf(pageCur) + 1 : pages.length;
+  pages.splice(at, 0, pg); pageCur = pg; return pg;
+}
+function newPage() {
+  addPage(); openParsed({ ents: [], tiles: [], wires: [], meta: newMeta() });
+  S.target = 2; $('#bp-target').value = '2'; renderBpSrc(); savePages();
+  toast('Página nueva. Las demás siguen abiertas en las pestañas de arriba.');
+}
+async function switchTo(pg) { if (!pg || pg === pageCur) return; stashPage(); await showPage(pg); savePages(); }
+function stepPage(d) { const n = pages.length; if (n < 2) return; switchTo(pages[(pages.indexOf(pageCur) + d + n) % n]); }
+function pageTitle(pg) { return (pg === pageCur ? $('#bp-label').value.trim() : pg.label) || 'Sin nombre'; }
+async function closePage(pg) {
+  const cur = pg === pageCur, has = cur ? !isEmptyS() : !!pg.str;
+  if (has && !(await askConfirm(`¿Cerrar «${pageTitle(pg)}»?`, 'La página se borra de este navegador. Si quieres conservar el plano, guárdalo en Mis planos o descárgalo antes.', 'Cerrar página'))) return;
+  const i = pages.indexOf(pg); if (i < 0) return; pages.splice(i, 1);
+  if (cur) { pageCur = null; if (!pages.length) pages.push({ id: pageId(), label: '', str: '', n: 0 }); await showPage(pages[Math.min(i, pages.length - 1)]); }
+  savePages();
+}
+// abre cada plano de un libro en su propia página; una página vacía sin historial se sustituye
+async function openBookPages(list, active, quiet, preset) {
+  if (!list || !list.length) return;
+  const old = pageCur; if (old) stashPage();
+  const np = list.map(it => Object.assign({ id: pageId(), label: it.bp.label || it.label || '', str: BP.encodeSync({ blueprint: it.bp }), n: it.n || 0 }, preset ? { ver: null } : {}));   // las plantillas no vienen del juego
+  pages.splice(old ? pages.indexOf(old) + 1 : pages.length, 0, ...np);
+  if (old && !old.str && !(old.live && old.live.undo.length)) pages.splice(pages.indexOf(old), 1);
+  pageCur = null; await showPage(np[clamp(active | 0, 0, np.length - 1)]); savePages();
+  if (!quiet) toast(`${np.length} planos abiertos, cada uno en su página. Cambia entre ellas en la barra de arriba (o con Alt+← y Alt+→).`, 'ok', 5000);
+}
+function renderPages() {
+  const root = $('#ptabs'); if (!root || pageRenaming) return;
+  root.innerHTML = pages.map(pg => {
+    const on = pg === pageCur, n = on ? S.ents.size : pg.n || 0, t = pageTitle(pg);
+    return `<div class="ptab${on ? ' on' : ''}" role="tab" tabindex="${on ? 0 : -1}" aria-selected="${on}" data-id="${esc(pg.id)}" title="${esc(t)}: ${n} entidades. Doble clic para cambiar el nombre"><span class="pt">${esc(t)}</span><small>${n}</small><button class="px" data-x tabindex="-1" aria-label="Cerrar ${esc(t)}" title="Cerrar página">×</button></div>`;
+  }).join('');
+  const on = root.querySelector('.ptab.on');
+  if (on && pageCur && pageOnId !== pageCur.id) { pageOnId = pageCur.id; const L = on.offsetLeft, R = L + on.offsetWidth; if (L < root.scrollLeft) root.scrollLeft = L; else if (R > root.scrollLeft + root.clientWidth) root.scrollLeft = R - root.clientWidth; }
+}
+function renamePage(tab) {
+  if (!pageCur || tab.dataset.id !== pageCur.id) return;
+  const sp = tab.querySelector('.pt'), inp = document.createElement('input');
+  inp.value = $('#bp-label').value; inp.maxLength = 200; inp.placeholder = 'Nombre del plano'; inp.setAttribute('aria-label', 'Nombre de la página');
+  sp.replaceWith(inp); pageRenaming = true; inp.focus(); inp.select();
+  const done = ok => { if (!pageRenaming) return; pageRenaming = false; if (ok) { $('#bp-label').value = inp.value.trim(); S.meta.label = inp.value.trim(); saveDraft(); } renderPages(); };
+  inp.addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter') done(true); else if (e.key === 'Escape') done(false); });
+  inp.addEventListener('blur', () => done(true));
+  for (const ev of ['click', 'dblclick', 'pointerdown']) inp.addEventListener(ev, e => e.stopPropagation());
+}
+const tabPage = el => { const t = el.closest('.ptab'); return t ? pages.find(p => p.id === t.dataset.id) : null; };
+$('#ptabs').addEventListener('click', e => { const pg = tabPage(e.target); if (!pg) return; if (e.target.closest('[data-x]')) closePage(pg); else switchTo(pg); });
+$('#ptabs').addEventListener('auxclick', e => { if (e.button !== 1) return; const pg = tabPage(e.target); if (pg) { e.preventDefault(); closePage(pg); } });
+$('#ptabs').addEventListener('dblclick', e => { const t = e.target.closest('.ptab'); if (t && !e.target.closest('[data-x]')) renamePage(t); });
+$('#ptabs').addEventListener('keydown', e => {
+  const pg = tabPage(e.target); if (!pg || e.target.tagName === 'INPUT') return;
+  if (['Enter', ' ', 'F2', 'Delete', 'ArrowLeft', 'ArrowRight'].includes(e.key)) e.stopPropagation();
+  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); switchTo(pg); }
+  else if (e.key === 'F2') { e.preventDefault(); renamePage(e.target.closest('.ptab')); }
+  else if (e.key === 'Delete') { e.preventDefault(); closePage(pg); }
+  else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); stepPage(e.key === 'ArrowLeft' ? -1 : 1); setTimeout(() => { const t = $('#ptabs .ptab.on'); if (t) t.focus(); }, 0); }
+});
+window.addEventListener('pagehide', () => { try { savePages(); } catch (e) { } });
+async function startPages() {
+  const st = LS.get('bpr.pages', null);
+  if (st && Array.isArray(st.list)) {
+    pages = st.list.filter(p => p && typeof p.str === 'string').map(p => ({ id: p.id || pageId(), label: p.label || '', str: p.str, view: p.view || null, n: p.n || 0, target: p.target === 1 ? 1 : 2, ver: p.ver ?? null }));
+    if (pages.length) { await showPage(pages[clamp(st.active | 0, 0, pages.length - 1)]); updateEmpty(); return; }
+  }
+  const d = LS.get('bpr.draft', null);
+  if (d) { pages = [{ id: pageId(), label: '', str: d, n: 0 }]; await showPage(pages[0]); savePages(); toast('Recuperado tu último plano'); return; }
+  // primera visita: el pack de megabase para Vulcano, cada plano en su página y con la ciencia metalúrgica a la vista
+  const dd = presetData(PRESETS[0]), star = dd.list.findIndex(it => /ciencia/i.test(it.bp.label));
+  await openBookPages(dd.list, Math.max(0, star), true, true);
+  toast(`Abierto el pack «${PRESETS[0].label}»: ${dd.list.length} planos, uno por página. «Plantillas» lo vuelve a abrir y «Nuevo» empieza un plano vacío.`, 'ok', 7000);
+}
+
+// ----- descargas y archivos -----
+function slug(s) { return norm(String(s || '')).replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'plano'; }
+function downloadText(name, text, msg) {
+  try {
+    const url = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' })), a = document.createElement('a');
+    a.href = url; a.download = slug(name) + '.txt'; a.hidden = true; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000); toast(msg || `Descargado ${a.download}`, 'ok', 4500);
+  } catch (e) { toast('El navegador no dejó descargar el archivo: ' + e.message, 'err'); }
+}
+async function downloadPages() {
+  savePages();
+  const kids = [];
+  for (const pg of pages) { if (!pg.str) continue; try { const o = await BP.decode(pg.str); if (o.blueprint) kids.push({ blueprint: Object.assign({}, o.blueprint, { label: pg.label || o.blueprint.label || 'Plano sin nombre' }) }); } catch (e) { } }
+  if (!kids.length) return toast('Todas las páginas están vacías', 'warn');
+  downloadText('paginas-blueprinter', BP.encodeSync(BP.buildBook('Páginas de Blueprinter', kids, S.target)), `Descargadas ${kids.length} páginas en un libro de planos (para Factorio ${S.target === 1 ? '1.1' : '2.0'}). Ábrelo aquí con «Importar → Abrir archivo» y «Abrir todo en páginas».`);
+}
+async function openFile(file) {
+  if (!file) return;
+  if (file.size > 30e6) return toast(`«${file.name}» es demasiado grande para ser un plano`, 'err');
+  let text; try { text = await file.text(); } catch (e) { return toast(`No se pudo leer «${file.name}»`, 'err'); }
+  try { const o = await BP.decode(text); importObject(o, 'open', text.trim()); }
+  catch (e) { toast(`«${file.name}»: ${e.message}`, 'err'); }
+}
+$('#file-in').addEventListener('change', e => { const f = e.target.files && e.target.files[0]; e.target.value = ''; if (!$('#m-import').hidden) closeModal($('#m-import')); openFile(f); });
+let dragN = 0;
+const dragFiles = e => !!(e.dataTransfer && [...(e.dataTransfer.types || [])].includes('Files'));
+window.addEventListener('dragenter', e => { if (!dragFiles(e)) return; e.preventDefault(); dragN++; $('#drop').hidden = false; });
+window.addEventListener('dragover', e => { if (!dragFiles(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; });
+window.addEventListener('dragleave', e => { if (!dragFiles(e)) return; if (--dragN <= 0) { dragN = 0; $('#drop').hidden = true; } });
+window.addEventListener('drop', e => {
+  if (!dragFiles(e)) return; e.preventDefault(); dragN = 0; $('#drop').hidden = true;
+  const m = document.querySelector('.modal:not([hidden])'); if (m) closeModal(m);
+  openFile(e.dataTransfer.files[0]);
+});
+
+// ----- plantillas de serie (src/core/presets.js) -----
+const TPL = new Map();
+function presetData(pr) {
+  let d = TPL.get(pr.id);
+  if (!d) { const obj = pr.book(); d = { obj, list: BP.flattenBook(obj.blueprint_book) }; d.list.forEach(it => { it.str = BP.encodeSync({ blueprint: it.bp }); }); TPL.set(pr.id, d); }
+  return d;
+}
+function openTemplates() {
+  $('#tm-body').innerHTML = PRESETS.map(pr => {
+    const d = presetData(pr), b = d.obj.blueprint_book;
+    return `<section class="tcard" data-p="${esc(pr.id)}"><h3>${esc(pr.label)}<small>${esc(pr.sub)}</small></h3><p>${esc(b.description || '')}</p>
+      <div class="row"><button class="btn primary small" data-a="pages">Abrir todo en páginas</button><button class="btn small" data-a="lib" title="Guardar todos los planos en una carpeta de Mis planos">Guardar en Mis planos</button><button class="btn small" data-a="copy" title="Copiar el libro entero para importarlo en Factorio">Copiar libro</button><button class="btn small" data-a="down">Descargar .txt</button></div>
+      <ul class="tlist">${d.list.map((it, i) => `<li data-i="${i}" title="${esc(it.bp.description || '')}"><canvas width="112" height="112" aria-hidden="true"></canvas><b>${esc(it.bp.label || 'Plano')}<small>${it.n} entidades</small></b><div class="row"><button class="btn small primary" data-a="open" title="Abrir en una página nueva para verlo y editarlo">Abrir</button><button class="btn small" data-a="hold" title="Llevarlo en el cursor para colocarlo en el plano actual">Al cursor</button></div></li>`).join('')}</ul></section>`;
+  }).join('');
+  $('#tm-body').querySelectorAll('.tcard').forEach(sec => { const d = TPL.get(sec.dataset.p); sec.querySelectorAll('li[data-i]').forEach(li => { const it = d.list[+li.dataset.i]; drawThumb(li.querySelector('canvas'), { id: `tpl:${sec.dataset.p}:${li.dataset.i}`, str: it.str }); }); });
+  openModal('m-tmpl', 'button.primary');
+}
+$('#tm-body').addEventListener('click', async e => {
+  const b = e.target.closest('button[data-a]'); if (!b) return;
+  const sec = b.closest('.tcard'), pr = PRESETS.find(p => p.id === sec.dataset.p), d = presetData(pr), a = b.dataset.a, li = b.closest('li[data-i]');
+  if (li) { const it = d.list[+li.dataset.i]; closeModal($('#m-tmpl')); loadBp(deep(it.bp), a === 'hold' ? 'hold' : 'open'); if (a !== 'hold') { S.meta.version = null; renderBpSrc(); } return; }
+  if (a === 'pages') { closeModal($('#m-tmpl')); return openBookPages(d.list, 0, false, true); }
+  if (a === 'lib') { closeModal($('#m-tmpl')); return openSave('book', { list: d.list, label: pr.label }); }
+  const str = BP.encodeSync(d.obj);
+  if (a === 'down') return downloadText(pr.label, str, `Libro «${pr.label}» descargado. En Factorio: «Importar cadena» y pega el contenido del archivo.`);
+  const ok = await writeClip(str); toast(ok ? `Libro «${pr.label}» copiado (${d.list.length} planos). En Factorio: «Importar cadena» y Ctrl+V.` : 'El navegador bloqueó el portapapeles; prueba con «Descargar .txt»', ok ? 'ok' : 'warn', 4500);
+});
 
 // ----- ejemplo -----
 function loadExample() {
@@ -1688,15 +1883,18 @@ document.querySelectorAll('.tool[data-act]').forEach(b => b.addEventListener('cl
   else if (a === 'undo') undo(); else if (a === 'redo') redo(); else if (a === 'fit') fitView(); else if (a === 'center') centerView(); else toggleFlag(a);
   cv.focus({ preventScroll: true });
 }));
-$('#b-new').onclick = async () => { if ((S.ents.size || S.tiles.size) && !(await askConfirm('¿Empezar un plano vacío?', 'Lo que hay ahora en el lienzo se perderá si no lo has copiado o guardado.', 'Empezar de cero'))) return; openParsed({ ents: [], tiles: [], wires: [], meta: newMeta() }); S.target = 2; $('#bp-target').value = '2'; renderBpSrc(); };
+$('#b-new').onclick = $('#pg-add').onclick = () => newPage();
 $('#b-import').onclick = $('#e-import').onclick = () => { openModal('m-import'); $('#imp-text').select(); checkImport(); };
 $('#b-copy').onclick = $('#s-copy').onclick = copyAll;
 $('#s-export').onclick = openExport;
 $('#b-help').onclick = () => openModal('m-help');
 $('#e-example').onclick = loadExample;
+$('#b-tmpl').onclick = $('#e-tmpl').onclick = openTemplates;
+$('#s-down').onclick = $('#ex-down').onclick = () => { if (isEmptyS()) return toast('El plano está vacío', 'warn'); downloadText($('#bp-label').value.trim() || 'Plano', BP.encodeSync(fullBp()), 'Plano descargado como .txt. Para abrirlo, suéltalo sobre la ventana o usa «Importar → Abrir archivo».'); };
+$('#pg-down').onclick = downloadPages;
 $('#b-side').onclick = () => $('#side').classList.toggle('open');
 $('#bp-target').onchange = e => { S.target = +e.target.value; renderBpSrc(); saveDraft(); };
-$('#bp-label').oninput = $('#bp-desc').oninput = () => { clearTimeout(saveT); saveT = setTimeout(saveDraft, 900); };
+$('#bp-label').oninput = $('#bp-desc').oninput = () => { clearTimeout(saveT); saveT = setTimeout(saveDraft, 900); renderPages(); };
 document.addEventListener('pointerdown', e => { const sd = $('#side'); if (sd.classList.contains('open') && !sd.contains(e.target) && e.target !== $('#b-side')) sd.classList.remove('open'); });
 
 // ----- arranque -----
@@ -1709,8 +1907,4 @@ resize(); V.s = 32; V.ox = -CW / 2 / V.s; V.oy = -CH / 2 / V.s;
 buildPalette(); renderLib(); renderSel(); renderContents(); renderBpSrc(); setMode('select'); updateStatus();
 if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { dirty = true; });
 requestAnimationFrame(frame);
-(async () => {
-  const d = LS.get('bpr.draft', null);
-  if (d) { try { const o = await BP.decode(d); if (o.blueprint) { openParsed(BP.parseBlueprint(o.blueprint)); toast('Recuperado tu último plano'); } } catch (e) { } }
-  updateEmpty();
-})();
+startPages();
