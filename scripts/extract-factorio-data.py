@@ -97,13 +97,14 @@ def lua_tables(path):
 
 # ---------- prototipos ----------
 MODS = ['base', 'elevated-rails', 'quality', 'space-age', 'recycler']
+ALLTABS = []
 def load(root):
     protos, srcs = [], []
     for mod in MODS:
         for dp, _, fn in os.walk(os.path.join(root, mod)):
             for f in sorted(fn):
                 if not f.endswith('.lua'): continue
-                tabs, src = lua_tables(os.path.join(dp, f)); srcs.append(src)
+                tabs, src = lua_tables(os.path.join(dp, f)); srcs.append(src); ALLTABS.extend(tabs)
                 for t in tabs:
                     if isinstance(t.get('type'), str) and isinstance(t.get('name'), str): t['__mod'] = mod; protos.append(t)
     return protos, srcs
@@ -187,6 +188,67 @@ def main(root):
     usable = {c for cs in machines.values() for c in cs}
     order = sorted((n for n, r in recipes.items() if any(c in usable for c in r['cats'])), key=key)
 
+    # ---------- datos para el planificador de producción ----------
+    mods = {'base': 0, 'elevated-rails': 1, 'quality': 1, 'space-age': 1, 'recycler': 1}
+    def num(v, d=0.0): return v if isinstance(v, float) else d
+    def kw(v):
+        m = re.match(r'([\d.]+)\s*([kMG]?)W', v) if isinstance(v, str) else None
+        return float(m.group(1)) * {'': 0.001, 'k': 1, 'M': 1000, 'G': 1e6}[m.group(2)] if m else 0
+    def entries(v):
+        out = []
+        for x in arr(v):
+            if not isinstance(x, dict) or not isinstance(x.get('name'), str): continue
+            out.append(x)
+        return out
+    # recetas y sus cambios de Space Age (data.raw.recipe[...].ingredients = {...}, [n] = {...} y table.insert)
+    rdefs = {n: dict(r) for n, r in by_type.get('recipe', {}).items()}
+    def parse_at(src, i):
+        p = Parser(lex(src[i:i + 4000])); return p.table() if p.peek() == ('op', '{') else None
+    for src in srcs:
+        for m in re.finditer(r'data\.raw\.recipe(?:\[\s*"([^"]+)"\s*\]|\.([A-Za-z_][\w]*))\.ingredients(?:\[(\d+)\])?\s*=\s*', src):
+            r = rdefs.get(m.group(1) or m.group(2)); t = parse_at(src, m.end())
+            if not r or t is None: continue
+            if m.group(3): ing = entries(r.get('ingredients')); k = int(m.group(3)) - 1; ing = ing + [None] * max(0, k + 1 - len(ing)); ing[k] = t; r['ingredients'] = {'__arr': [x for x in ing if x]}
+            else: r['ingredients'] = t
+        for m in re.finditer(r'table\.insert\(\s*data\.raw\.recipe\[\s*"([^"]+)"\s*\]\.ingredients\s*,\s*', src):
+            r = rdefs.get(m.group(1)); t = parse_at(src, m.end())
+            if r and t is not None: r['ingredients'] = {'__arr': entries(r.get('ingredients')) + [t]}
+    def expect(x):
+        a = num(x.get('amount'), None) if isinstance(x.get('amount'), float) else (num(x.get('amount_min')) + num(x.get('amount_max'))) / 2
+        pr = num(x.get('probability'), 1.0) * num(x.get('independent_probability'), 1.0)   # 2.0: probability; 2.1: independent y shared {min, max}
+        sh = x.get('shared_probability')
+        if isinstance(sh, dict): pr *= num(sh.get('max'), 1.0) - num(sh.get('min'), 0.0)
+        return (a or 0) * pr + num(x.get('extra_count_fraction'))
+    # máquinas del planificador: también los hornos, que eligen la receta solos
+    pmach = {}
+    for t in ('assembling-machine', 'rocket-silo', 'furnace'):
+        for n, p in by_type.get(t, {}).items():
+            cats = strs(p.get('crafting_categories'))
+            if not cats or n not in buildings or buildings[n]['hidden'] or 'recycling' in cats: continue
+            er = p.get('effect_receiver') if isinstance(p.get('effect_receiver'), dict) else {}
+            be = er.get('base_effect') if isinstance(er.get('base_effect'), dict) else {}
+            pmach[n] = [num(p.get('crafting_speed'), 1.0), int(num(p.get('module_slots'))), num(be.get('productivity')), kw(p.get('energy_usage')), cats, mods[buildings[n]['mod']]]
+    pcats = {c for m in pmach.values() for c in m[4]}
+    rdata = {}
+    for n, r in rdefs.items():
+        if n not in recipes or not any(c in pcats for c in recipes[n]['cats']): continue
+        ing = [[x['name'], num(x.get('amount')), int(x.get('type') == 'fluid')] for x in entries(r.get('ingredients'))]
+        res = [[x['name'], round(expect(x), 6), int(x.get('type') == 'fluid'), round(num(x.get('ignored_by_productivity')), 6)] for x in entries(r.get('results'))]
+        if not res: continue
+        rdata[n] = [num(r.get('energy_required'), 0.5), ing, res, int(r.get('allow_productivity') is True), recipes[n]['cats'], mods[recipes[n]['mod']]]
+    # minerales y perforadoras (para saber cuántas hacen falta)
+    resources = {}
+    for n, p in by_type.get('resource', {}).items():
+        mi = p.get('minable') if isinstance(p.get('minable'), dict) else {}
+        out = [x['name'] for x in entries(mi.get('results'))] or ([mi['result']] if isinstance(mi.get('result'), str) else [])
+        if out and isinstance(mi.get('mining_time'), float): resources[n] = [mi['mining_time'], p.get('category') if isinstance(p.get('category'), str) else 'basic-solid', out]
+    # los minerales normales se definen con una función: sus parámetros son tablas con name y mining_time, sin type
+    for t in ALLTABS:
+        if 'type' in t or not isinstance(t.get('name'), str) or not isinstance(t.get('mining_time'), float) or t['name'] in resources: continue
+        if t['name'] not in items: continue
+        resources[t['name']] = [t['mining_time'], t.get('category') if isinstance(t.get('category'), str) else 'basic-solid', [t['name']]]
+    drills = {n: [num(p.get('mining_speed'), 0.5), strs(p.get('resource_categories')), kw(p.get('energy_usage')), mods[buildings[n]['mod']]] for n, p in by_type.get('mining-drill', {}).items() if n in buildings and not buildings[n]['hidden']}
+
     ver = json.load(open(os.path.join(root, 'base', 'info.json')))['version']
     mods = {'base': 0, 'elevated-rails': 1, 'quality': 1, 'space-age': 1, 'recycler': 1}
     out = []
@@ -198,6 +260,15 @@ def main(root):
     out.append('export const RECIPE_LIST = [')
     for n in order: out.append('  %s,' % json.dumps([n, recipes[n]['cats'], mods[recipes[n]['mod']]], separators=(',', ':')))
     out.append('];')
+    out.append('/** Recetas para el planificador: [tiempo, [[ingrediente, cantidad, 1 si es fluido]], [[producto, cantidad esperada, 1 si es fluido, cantidad que no cuenta para la productividad]], 1 si admite productividad, categorías, 1 si es de Space Age]. */')
+    out.append('export const RECIPE_DATA = {')
+    for n in sorted(rdata): out.append('  %s: %s,' % (json.dumps(n), json.dumps(rdata[n], separators=(',', ':'))))
+    out.append('};')
+    out.append('/** Máquinas del planificador: [velocidad, ranuras de módulo, productividad base, kW, categorías, 1 si es de Space Age]. */')
+    out.append('export const PLANNER_MACHINES = %s;' % json.dumps(pmach, separators=(',', ':')))
+    out.append('/** Minerales: [tiempo de extracción, categoría, productos]. Perforadoras: [velocidad, categorías, kW, 1 si es de Space Age]. */')
+    out.append('export const RESOURCES = %s;' % json.dumps(resources, separators=(',', ':')))
+    out.append('export const DRILLS = %s;' % json.dumps(drills, separators=(',', ':')))
     out.append('/** Edificios colocables: tamaño en casillas (null si se coloca libremente), 1 si está oculto en partidas normales, 1 si es de Space Age. */')
     out.append('export const BUILDINGS = {')
     for n in sorted(buildings): b = buildings[n]; out.append('  %s: %s,' % (json.dumps(n), json.dumps([b['size'], int(b['hidden']), mods[b['mod']]], separators=(',', ':'))))

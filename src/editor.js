@@ -1,5 +1,7 @@
 import { BP } from './core/blueprint.js';
 import { PRESETS } from './core/presets.js';
+import { plan, products, producers, machinesFor, itemName, recipeLabel, isFluid, recipe, MODULES, BELTS } from './core/planner.js';
+import { DRILLS } from './core/gamedata.js';
 import { HV, rotQ, normDir, railKey, railEndsOf, tmplVariants, tmplMQ, tmplPieces, tmplEnds, slotsAtEnd, railMoves, planRails } from './core/rails.js';
 
 /* ===== Editor: estado, historial, índice y dibujo ===== */
@@ -1927,6 +1929,168 @@ $('#tm-body').addEventListener('click', async e => {
   if (a === 'down') return downloadText(pr.label, str, `Libro «${pr.label}» descargado. En Factorio: «Importar cadena» y pega el contenido del archivo.`);
   const ok = await writeClip(str); toast(ok ? `Libro «${pr.label}» copiado (${d.list.length} planos). En Factorio: «Importar cadena» y Ctrl+V.` : 'El navegador bloqueó el portapapeles; prueba con «Descargar .txt»', ok ? 'ok' : 'warn', 4500);
 });
+
+// ----- planificador de producción (src/core/planner.js): qué hace falta para fabricar algo a un ritmo dado -----
+const PLS = Object.assign({ targets: [['electronic-circuit', 10, 's']], opt: { spaceAge: true, modules: 'none', beacons: 0, drill: 'electric-mining-drill', belt: 60, recipes: {}, machines: {}, raw: [] }, tab: 'graph' }, LS.get('bpr.plan', {}));
+const PLAN_QUICK = [
+  ['Circuitos verdes', [['electronic-circuit', 10, 's']]], ['Circuitos rojos', [['advanced-circuit', 5, 's']]], ['Circuitos azules', [['processing-unit', 2, 's']]],
+  ['Ciencias de Nauvis', ['automation-science-pack', 'logistic-science-pack', 'military-science-pack', 'chemical-science-pack', 'production-science-pack', 'utility-science-pack'].map(n => [n, 1, 's'])],
+  ['Cohete por minuto', [['rocket-part', 50, 'min']]], ['Ciencia metalúrgica', [['metallurgic-science-pack', 1, 's']]], ['Cinta turbo', [['turbo-transport-belt', 1, 's']]],
+];
+const fmtN = v => (v >= 100 ? Math.round(v) : v >= 10 ? Math.round(v * 10) / 10 : Math.round(v * 100) / 100).toLocaleString('es');
+const ICONS = new Map();
+function iconURL(name) {
+  if (!DEFS[name] || !DEFS[name].cat) return null;
+  let u = ICONS.get(name); if (u) return u;
+  const c = document.createElement('canvas'); c.width = c.height = 72; drawIcon(c, name); u = c.toDataURL(); ICONS.set(name, u); return u;
+}
+const PCOL = ['#e3ad1a', '#dd4636', '#3a9be2', '#79c142', '#c9743a', '#8a6db3', '#4b8f69', '#c99f36', '#5f8fb8', '#b85f8f'];
+const itemColor = it => isFluid(it) ? '#3d9bff' : PCOL[[...it].reduce((a, ch) => (a * 31 + ch.charCodeAt(0)) >>> 0, 7) % PCOL.length];
+const savePlan = () => LS.set('bpr.plan', PLS);
+let planItems = null;   // etiqueta → objeto
+function planFillItems() {
+  const list = products(PLS.opt.spaceAge); planItems = new Map(list.map(n => [norm(itemName(n)), n]));
+  $('#dl-items').innerHTML = list.map(n => `<option value="${esc(itemName(n))}"></option>`).join('');
+}
+function planTargetsHtml() {
+  $('#pl-targets').innerHTML = PLS.targets.map(([it, rate, u], i) => `<div class="pl-t" data-i="${i}">
+    <input list="dl-items" value="${esc(it ? itemName(it) : '')}" placeholder="Producto, p. ej. circuito" aria-label="Producto" spellcheck="false" autocomplete="off" data-k="item">
+    <input type="number" min="0" step="any" value="${rate}" aria-label="Cantidad" data-k="rate">
+    <select aria-label="Unidad" data-k="unit"><option value="s"${u === 's' ? ' selected' : ''}>/s</option><option value="min"${u === 'min' ? ' selected' : ''}>/min</option></select>
+    <button class="xbtn" data-k="del" aria-label="Quitar" title="Quitar">×</button>
+    <span class="lbl">${it ? esc(it) : 'Escribe y elige de la lista'}</span></div>`).join('');
+}
+$('#pl-targets').addEventListener('change', e => {
+  const row = e.target.closest('.pl-t'); if (!row) return; const t = PLS.targets[+row.dataset.i], k = e.target.dataset.k;
+  if (k === 'item') { const v = e.target.value.trim(), it = planItems.get(norm(v)) || (RECIPE_ANY(v) ? v : null); if (it) t[0] = it; else { toast(`No encuentro «${v}». Elige un producto de la lista.`, 'warn'); } }
+  else if (k === 'rate') t[1] = Math.max(0, +e.target.value || 0);
+  else if (k === 'unit') t[2] = e.target.value;
+  planUpdate(true);
+});
+$('#pl-targets').addEventListener('click', e => { const b = e.target.closest('[data-k="del"]'); if (!b) return; PLS.targets.splice(+b.closest('.pl-t').dataset.i, 1); planUpdate(true); });
+const RECIPE_ANY = v => products(true).includes(v);
+$('#pl-add').onclick = () => { PLS.targets.push(['', 1, 's']); planTargetsHtml(); const ins = $('#pl-targets').querySelectorAll('input[data-k="item"]'); ins[ins.length - 1].focus(); };
+$('#pl-quick').innerHTML = PLAN_QUICK.map(([l], i) => `<button type="button" data-q="${i}">${esc(l)}</button>`).join('');
+$('#pl-quick').addEventListener('click', e => { const b = e.target.closest('[data-q]'); if (!b) return; PLS.targets = PLAN_QUICK[+b.dataset.q][1].map(t => t.slice()); if (PLS.targets.some(([n]) => recipe(n) && recipe(n).sa)) PLS.opt.spaceAge = true; planUpdate(true); });
+$('#pl-mod').innerHTML = Object.entries(MODULES).map(([k, m]) => `<option value="${k}">${esc(m.label)}</option>`).join('');
+$('#pl-drill').innerHTML = Object.keys(DRILLS).filter(d => d !== 'pumpjack').map(d => `<option value="${d}">${esc(def(d).label)}</option>`).join('');
+$('#pl-belt').innerHTML = Object.entries(BELTS).map(([v, l]) => `<option value="${v}">${esc(l)} (${v}/s)</option>`).join('');
+for (const [id, k, f] of [['#pl-sa', 'spaceAge', el => el.checked], ['#pl-mod', 'modules', el => el.value], ['#pl-bea', 'beacons', el => clamp(Math.round(+el.value) || 0, 0, 16)], ['#pl-drill', 'drill', el => el.value], ['#pl-belt', 'belt', el => +el.value]])
+  $(id).addEventListener('change', e => { PLS.opt[k] = f(e.target); if (k === 'spaceAge') planFillItems(); planUpdate(false); });
+document.querySelectorAll('#m-plan [data-pt]').forEach(b => b.onclick = () => { PLS.tab = b.dataset.pt; planUpdate(false); });
+
+let PLR = null;
+function planUpdate(targets) {
+  const o = PLS.opt;
+  $('#pl-sa').checked = !!o.spaceAge; $('#pl-mod').value = o.modules; $('#pl-bea').value = o.beacons; $('#pl-drill').value = o.drill; $('#pl-belt').value = String(o.belt);
+  if (targets !== false) planTargetsHtml();
+  document.querySelectorAll('#m-plan [data-pt]').forEach(b => b.classList.toggle('on', b.dataset.pt === PLS.tab));
+  for (const v of ['graph', 'table', 'raw']) $('#pl-' + v).hidden = PLS.tab !== v;
+  const T = PLS.targets.filter(([it, r]) => it && r > 0).map(([it, r, u]) => [it, u === 'min' ? r / 60 : r]);
+  PLR = plan(T, o); savePlan();
+  const nm = PLR.rows.reduce((a, r) => a + Math.ceil(r.machines - 1e-9), 0);
+  $('#pl-sum').textContent = T.length ? `${nm.toLocaleString('es')} máquinas · ${fmtN(PLR.power)} MW · ${PLR.raw.length} materias primas` : '';
+  if (PLS.tab === 'graph') planGraph(PLR); else if (PLS.tab === 'table') planTable(PLR); else planRaw(PLR);
+}
+function planTable(R) {
+  if (!R.rows.length) { $('#pl-table').innerHTML = '<p class="pl-empty">Elige a la izquierda qué quieres fabricar.</p>'; return; }
+  const sa = PLS.opt.spaceAge, raws = new Set(PLS.opt.raw);
+  $('#pl-table').innerHTML = `<table><thead><tr><th>Producto y receta</th><th>Máquina</th><th class="n">Máquinas</th><th>Produce</th><th>Consume</th><th class="n">MW</th><th>Se trae</th></tr></thead><tbody>${R.rows.map(r => {
+    const alts = producers(r.item).filter(n => sa || !recipe(n).sa), ms = machinesFor(r.recipe, sa), ic = iconURL(r.machine);
+    return `<tr data-r="${esc(r.recipe)}" data-it="${esc(r.item)}"><td><span class="big">${esc(itemName(r.item))}</span>${alts.length > 1 ? `<select data-k="recipe" aria-label="Receta">${alts.map(n => `<option value="${esc(n)}"${n === r.recipe ? ' selected' : ''}>${esc(recipeLabel(n))}</option>`).join('')}</select>` : `<span class="sub">${esc(recipeLabel(r.recipe))}</span>`}</td>
+      <td>${ic ? `<img class="ic" src="${ic}" alt="">` : ''}${ms.length > 1 ? `<select data-k="machine" aria-label="Máquina">${ms.map(m => `<option value="${m}"${m === r.machine ? ' selected' : ''}>${esc(def(m).label)}</option>`).join('')}</select>` : esc(def(r.machine).label)}</td>
+      <td class="n"><span class="big">${Math.ceil(r.machines - 1e-9)}</span><span class="sub">${fmtN(r.machines)}</span></td>
+      <td>${r.outputs.map(([it, v]) => `${esc(itemName(it))} <b>${fmtN(v)}/s</b>`).join('<br>')}</td>
+      <td>${r.inputs.map(([it, v]) => `${esc(itemName(it))} ${fmtN(v)}/s`).join('<br>')}</td>
+      <td class="n">${fmtN(r.power)}</td>
+      <td><label class="chk"><input type="checkbox" data-k="raw"${raws.has(r.item) ? ' checked' : ''}> traer</label></td></tr>`;
+  }).join('')}</tbody></table>`;
+}
+$('#pl-table').addEventListener('change', e => {
+  const tr = e.target.closest('tr[data-r]'); if (!tr) return; const k = e.target.dataset.k, o = PLS.opt;
+  if (k === 'recipe') o.recipes[tr.dataset.it] = e.target.value;
+  else if (k === 'machine') o.machines[tr.dataset.r] = e.target.value;
+  else if (k === 'raw') { o.raw = o.raw.filter(x => x !== tr.dataset.it); if (e.target.checked) o.raw.push(tr.dataset.it); }
+  planUpdate(false);
+});
+function planRaw(R) {
+  const belt = PLS.opt.belt, nm = R.rows.reduce((a, r) => a + Math.ceil(r.machines - 1e-9), 0);
+  const ext = w => w.extractors ? `${Math.ceil(w.extractors.count - 1e-9)} × ${esc(def(w.extractors.name).label)}` : isFluid(w.item) ? 'bombeo' : '';
+  $('#pl-raw').innerHTML = `<div class="pl-cards"><div><b>${nm.toLocaleString('es')}</b><small>máquinas</small></div><div><b>${fmtN(R.power)} MW</b><small>electricidad (sin balizas ni perforadoras)</small></div><div><b>${R.raw.length}</b><small>materias primas</small></div><div><b>${R.rows.length}</b><small>recetas en la cadena</small></div></div>
+    <table><thead><tr><th>Materia prima o lo que se trae</th><th class="n">por segundo</th><th class="n">por minuto</th><th class="n">Transporte</th><th>Extracción</th></tr></thead><tbody>
+    ${R.raw.map(w => `<tr><td class="big">${esc(itemName(w.item))}</td><td class="n">${fmtN(w.rate)}</td><td class="n">${fmtN(w.rate * 60)}</td><td class="n">${isFluid(w.item) ? `${fmtN(w.rate / 1200)} tuberías llenas` : `${fmtN(w.rate / belt)} cintas`}</td><td>${ext(w)}</td></tr>`).join('') || '<tr><td colspan="5" class="pl-empty">Nada</td></tr>'}</tbody></table>
+    ${R.surplus.length ? `<table><thead><tr><th>Sobra (subproductos)</th><th class="n">por segundo</th><th class="n">por minuto</th><th></th><th></th></tr></thead><tbody>${R.surplus.map(s => `<tr><td>${esc(itemName(s.item))}</td><td class="n">${fmtN(s.rate)}</td><td class="n">${fmtN(s.rate * 60)}</td><td></td><td></td></tr>`).join('')}</tbody></table>` : ''}
+    ${R.cycles.length ? `<p class="hint" style="padding:0 10px">Hay recetas en ciclo (${R.cycles.map(itemName).join(', ')}): ahí se cuenta lo que entra como si se trajera.</p>` : ''}`;
+}
+// esquema: columnas de izquierda (materias primas) a derecha (lo pedido); cada caja es un paso con su máquina
+function planGraph(R) {
+  const box = $('#pl-graph');
+  if (!R.rows.length && !R.raw.length) { box.innerHTML = '<p class="pl-empty">Elige a la izquierda qué quieres fabricar y aquí verás la cadena completa con sus máquinas.</p>'; return; }
+  const nodes = [], byItem = new Map(), nodeOf = new Map();
+  for (const r of R.rows) { const n = { kind: 'row', r, h: 74 }; nodes.push(n); nodeOf.set(r.recipe, n); }
+  for (const r of R.rows) for (const [it] of r.outputs) if (!byItem.has(it) || r.item === it) byItem.set(it, nodeOf.get(r.recipe));
+  for (const w of R.raw) { const n = { kind: 'raw', w, h: 54 }; nodes.push(n); if (!R.rows.some(r => r.item === w.item)) byItem.set(w.item, n); }
+  const edges = [];
+  for (const r of R.rows) for (const [it, v] of r.inputs) { const src = byItem.get(it); if (src && v > 1e-9 && src !== nodeOf.get(r.recipe)) edges.push({ a: src, b: nodeOf.get(r.recipe), it, v }); }
+  for (const [it, v] of R.targets) { const g = { kind: 'goal', it, v, h: 54 }; nodes.push(g); const src = byItem.get(it); if (src) edges.push({ a: src, b: g, it, v }); }
+  // capas: distancia hasta lo pedido (las materias primas van a la izquierda del todo)
+  const d = new Map(nodes.map(n => [n, n.kind === 'goal' ? 0 : -1]));
+  for (let k = 0; k < nodes.length; k++) { let ch = false; for (const e of edges) { const v = d.get(e.b) + 1; if (d.get(e.b) >= 0 && v > d.get(e.a) && v <= nodes.length) { d.set(e.a, v); ch = true; } } if (!ch) break; }
+  let maxD = 0; for (const [n, v] of d) if (n.kind !== 'raw') maxD = Math.max(maxD, v);
+  for (const n of nodes) if (n.kind === 'raw' || d.get(n) < 0) d.set(n, maxD + 1);
+  maxD += 1;
+  const cols = Array.from({ length: maxD + 1 }, () => []); for (const n of nodes) cols[maxD - d.get(n)].push(n);
+  const CW = 270, NW = 214, GAP = 16, PAD = 20;
+  const place = () => cols.forEach(c => { let y = PAD; for (const n of c) { n.y = y; y += n.h + GAP; } });
+  place();
+  for (let pass = 0; pass < 4; pass++) {   // ordenar cada columna por la altura media de lo que conecta
+    for (const c of cols) { for (const n of c) { const ys = edges.filter(e => e.a === n || e.b === n).map(e => (e.a === n ? e.b : e.a)).map(m => m.y + m.h / 2); n.k = ys.length ? ys.reduce((a, b) => a + b) / ys.length : n.y; } c.sort((a, b) => a.k - b.k); }
+    place();
+  }
+  cols.forEach((c, i) => c.forEach(n => { n.x = PAD + i * CW; }));
+  const H = Math.max(...cols.map(c => c.reduce((a, n) => a + n.h + GAP, PAD))) + PAD, W = PAD * 2 + maxD * CW + NW;
+  const ns = 'http://www.w3.org/2000/svg', svg = document.createElementNS(ns, 'svg');
+  svg.setAttribute('width', W); svg.setAttribute('height', H); svg.setAttribute('viewBox', `0 0 ${W} ${H}`); svg.setAttribute('role', 'img'); svg.setAttribute('aria-label', 'Esquema de la cadena de producción');
+  const mk = (tag, a, parent, txt) => { const e = document.createElementNS(ns, tag); for (const k in a) e.setAttribute(k, a[k]); if (txt != null) e.textContent = txt; (parent || svg).appendChild(e); return e; };
+  const gE = mk('g', {}), gL = mk('g', {}), gN = mk('g', {});
+  // reparto de los puntos de entrada y salida en cada caja para que las líneas no se monten
+  const ports = (n, side) => { const es = edges.filter(e => (side === 'out' ? e.a : e.b) === n).sort((p, q) => (side === 'out' ? p.b.y - q.b.y : p.a.y - q.a.y)); es.forEach((e, i) => { e[side] = n.y + n.h * (i + 1) / (es.length + 1); }); };
+  for (const n of nodes) { ports(n, 'out'); ports(n, 'in'); }
+  for (const e of edges) {
+    const x0 = e.a.x + NW, x1 = e.b.x, y0 = e.out, y1 = e.in, k = Math.max(40, (x1 - x0) * 0.5), col = itemColor(e.it);
+    const path = mk('path', { d: `M${x0} ${y0} C${x0 + k} ${y0} ${x1 - k} ${y1} ${x1} ${y1}`, fill: 'none', stroke: col, 'stroke-width': 2.2, 'stroke-opacity': .85 }, gE);
+    mk('title', {}, path, `${itemName(e.it)}: ${fmtN(e.v)}/s`);
+    // la etiqueta solo cuando no es lo que ya pone la caja de origen (subproductos)
+    if (x1 - x0 > 40 && e.a.kind === 'row' && e.a.r.item !== e.it) {
+      const tx = x0 + 10, ty = y0 - 4, t = mk('text', { x: tx, y: ty, 'font-size': 11.5, fill: col, 'font-family': UIF }, gL, `${itemName(e.it)} ${fmtN(e.v)}/s`);
+      const w = t.getComputedTextLength ? t.getComputedTextLength() : 80; if (w > CW - NW - 14) t.textContent = `${fmtN(e.v)}/s`;
+    }
+  }
+  const T = (x, y, s, txt, wt, col, parent) => mk('text', { x, y, 'font-size': s, 'font-weight': wt || 400, fill: col || 'var(--text)', 'font-family': UIF }, parent, txt);
+  for (const n of nodes) {
+    const g = mk('g', {}, gN);
+    if (n.kind === 'row') {
+      const r = n.r, ic = iconURL(r.machine), col = itemColor(r.item);
+      mk('rect', { x: n.x, y: n.y, width: NW, height: n.h, rx: 6, fill: 'var(--panel)', stroke: col, 'stroke-width': 1.5 }, g);
+      if (ic) mk('image', { href: ic, x: n.x + 8, y: n.y + 10, width: 40, height: 40 }, g);
+      const t = T(n.x + 56, n.y + 22, 14, itemName(r.item), 700, null, g); if (t.getComputedTextLength && t.getComputedTextLength() > NW - 62) { let s = itemName(r.item); while (s.length > 4 && (t.textContent = s + '…', t.getComputedTextLength() > NW - 62)) s = s.slice(0, -1); }
+      T(n.x + 56, n.y + 40, 12.5, `${fmtN(r.machines)} × ${def(r.machine).label}`, 400, 'var(--muted)', g);
+      T(n.x + 56, n.y + 58, 13, `${fmtN(r.outputs.find(o => o[0] === r.item)[1])}/s`, 600, col, g);
+      T(n.x + NW - 10, n.y + 58, 12, `${Math.ceil(r.machines - 1e-9)} uds.`, 600, 'var(--muted)', g).setAttribute('text-anchor', 'end');
+    } else if (n.kind === 'raw') {
+      const w = n.w; mk('rect', { x: n.x, y: n.y, width: NW, height: n.h, rx: 6, fill: 'var(--inset)', stroke: 'var(--line-2)', 'stroke-dasharray': '5 3' }, g);
+      T(n.x + 12, n.y + 21, 13.5, itemName(w.item), 700, null, g);
+      T(n.x + 12, n.y + 40, 12.5, `${fmtN(w.rate)}/s${w.extractors ? ` · ${Math.ceil(w.extractors.count - 1e-9)} × ${def(w.extractors.name).label}` : ''}`, 400, 'var(--muted)', g);
+    } else {
+      mk('rect', { x: n.x, y: n.y, width: NW, height: n.h, rx: 6, fill: 'var(--accent-soft)', stroke: 'var(--accent)', 'stroke-width': 1.5 }, g);
+      T(n.x + 12, n.y + 21, 12, 'OBJETIVO', 700, 'var(--accent)', g);
+      T(n.x + 12, n.y + 40, 13.5, `${itemName(n.it)} · ${fmtN(n.v)}/s`, 700, null, g);
+    }
+  }
+  box.innerHTML = ''; box.appendChild(svg);
+}
+function openPlanner() { if (!planItems) planFillItems(); openModal('m-plan', '#pl-targets input'); planUpdate(true); }
+$('#b-plan').onclick = openPlanner;
 
 // ----- ejemplo -----
 function loadExample() {

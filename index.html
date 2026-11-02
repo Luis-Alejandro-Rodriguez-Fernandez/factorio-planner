@@ -16,6 +16,7 @@
   </div>
   <div class="tb">
     <button class="btn" id="b-new" title="Abrir una página nueva con un plano vacío">Nuevo</button>
+    <button class="btn" id="b-plan" title="Calcula cuántas máquinas hacen falta para fabricar algo a un ritmo dado, con el esquema de toda la cadena">Producción</button>
     <button class="btn" id="b-tmpl" title="Planos de serie listos para ver y editar, como el pack de megabase para Vulcano">Plantillas</button>
     <button class="btn" id="b-import" title="Importar un string o un archivo de plano (también puedes pulsar Ctrl+V sobre el lienzo o soltar un archivo)">Importar</button>
     <button class="btn primary" id="b-copy" title="Copiar el plano completo como string para Factorio">Copiar<span class="hide-m"> string</span></button>
@@ -145,6 +146,7 @@
         <dt><kbd>Ctrl</kbd>+<kbd>C</kbd> · <kbd>X</kbd> · <kbd>V</kbd></dt><dd>Copiar, cortar y pegar. Lo copiado ya es un string válido para Factorio, y puedes pegar strings del juego directamente</dd>
         <dt><kbd>Ctrl</kbd>+<kbd>S</kbd></dt><dd>Copiar el plano completo como string</dd>
         <dt>Páginas</dt><dd>Cada pestaña de arriba es un plano abierto, con su propio historial y su vista. «+» o «Nuevo» abren una vacía, doble clic en el nombre lo cambia y × la cierra. Se guardan solas en este navegador. <kbd>Alt</kbd>+<kbd>←</kbd> <kbd>→</kbd> cambian de página</dd>
+        <dt>Producción</dt><dd>Elige qué quieres fabricar y a qué ritmo (por ejemplo, 10 circuitos electrónicos por segundo) y el planificador calcula cada receta de la cadena, cuántas máquinas hacen falta, qué materias primas entran y cuánta electricidad se gasta, con el esquema dibujado</dd>
         <dt>Archivos</dt><dd>«Descargar» guarda el plano, las páginas o tu biblioteca en un .txt con el string del juego. Para abrir uno, suéltalo sobre la ventana o usa «Importar → Abrir archivo»</dd>
         <dt><kbd>Ctrl</kbd>+<kbd>B</kbd></dt><dd>Guardar la selección como fragmento en «Mis planos». Desde ahí, «Colocar» la lleva en el cursor para reutilizarla</dd>
         <dt><kbd>Ctrl</kbd>+<kbd>D</kbd></dt><dd>Repetir la selección a la derecha (en el panel puedes elegir cuántas veces, hacia dónde y con qué separación)</dd>
@@ -158,6 +160,38 @@
     </div>
   </div>
 </div>
+
+<div class="modal" id="m-plan" hidden>
+  <div class="dialog full" role="dialog" aria-modal="true" aria-labelledby="mp-t">
+    <header><h2 id="mp-t">Planificador de producción</h2><span class="hint" id="pl-sum" style="margin:0"></span><button class="xbtn" data-close aria-label="Cerrar">×</button></header>
+    <div class="plan">
+      <aside class="pl-side">
+        <section>
+          <h3>Qué quieres fabricar</h3>
+          <div id="pl-targets"></div>
+          <button class="btn small" id="pl-add" type="button">+ Añadir producto</button>
+          <div class="pl-quick" id="pl-quick"></div>
+        </section>
+        <section>
+          <h3>Opciones</h3>
+          <label class="chk"><input type="checkbox" id="pl-sa"> Space Age (fundición, planta electromagnética…)</label>
+          <label class="field"><span>Módulos en las máquinas</span><select id="pl-mod"></select></label>
+          <label class="field"><span>Balizas por máquina (2 de velocidad 3 cada una)</span><input id="pl-bea" type="number" min="0" max="16" step="1"></label>
+          <label class="field"><span>Perforadora para los minerales</span><select id="pl-drill"></select></label>
+          <label class="field"><span>Cinta para contar el transporte</span><select id="pl-belt"></select></label>
+          <p class="hint">En la tabla de máquinas puedes cambiar la receta y la máquina de cada paso, o marcar algo como «se trae» para no fabricarlo aquí.</p>
+        </section>
+      </aside>
+      <div class="pl-main">
+        <div class="seg pl-tabs" role="tablist"><button data-pt="graph" class="on">Esquema</button><button data-pt="table">Máquinas</button><button data-pt="raw">Materias primas</button></div>
+        <div class="pl-view" id="pl-graph"></div>
+        <div class="pl-view" id="pl-table" hidden></div>
+        <div class="pl-view" id="pl-raw" hidden></div>
+      </div>
+    </div>
+  </div>
+</div>
+<datalist id="dl-items"></datalist>
 
 <div class="modal" id="m-tmpl" hidden>
   <div class="dialog wide" role="dialog" aria-modal="true" aria-labelledby="mt-t">

@@ -87,6 +87,37 @@ kbd{font:600 12px var(--ui);padding:1px 6px;border-radius:4px;background:var(--b
 .pbtn:hover{background:var(--btn);border-color:var(--line-2)}
 .pbtn svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 
+/* planificador de producción */
+.dialog.full{width:min(1400px,100%);height:min(900px,100%)}
+.plan{flex:1;min-height:0;display:grid;grid-template-columns:300px minmax(0,1fr)}
+.pl-side{border-right:1px solid var(--line);overflow-y:auto;padding:12px 14px;display:flex;flex-direction:column;gap:16px;background:var(--panel-2)}
+.pl-side h3{margin:0 0 8px;font-size:14px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
+.pl-side section{display:flex;flex-direction:column;gap:8px}
+.pl-t{display:grid;grid-template-columns:minmax(0,1fr) 64px 64px 26px;gap:4px;align-items:center}
+.pl-t input,.pl-t select{min-width:0;padding:5px 6px;border-radius:5px;border:1px solid var(--line);background:var(--inset);font-size:13.5px}
+.pl-t .lbl{grid-column:1/-1;font-size:12.5px;color:var(--muted);margin:-2px 0 4px 2px}
+.pl-quick{display:flex;flex-wrap:wrap;gap:4px}
+.pl-quick button{font-size:12.5px;padding:3px 8px;border-radius:12px;border:1px solid var(--line-2);background:var(--btn);cursor:pointer;color:var(--text)}
+.pl-quick button:hover{border-color:var(--accent)}
+.pl-main{min-width:0;min-height:0;display:flex;flex-direction:column;padding:10px 12px 12px;gap:10px}
+.pl-tabs{align-self:flex-start}
+.pl-view{flex:1;min-height:0;overflow:auto;border:1px solid var(--line);border-radius:6px;background:var(--inset)}
+.pl-view svg{display:block}
+.pl-view table{border-collapse:collapse;width:100%;font-size:14px}
+.pl-view th,.pl-view td{padding:6px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}
+.pl-view th{position:sticky;top:0;background:var(--panel-2);font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);z-index:1}
+.pl-view td.n,.pl-view th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.pl-view td select{max-width:220px;padding:3px 5px;border-radius:4px;border:1px solid var(--line);background:var(--panel);font-size:13px}
+.pl-view .ic{width:28px;height:28px;vertical-align:middle;margin-right:6px}
+.pl-view .big{font-weight:700;font-size:15px}
+.pl-view .sub{display:block;font-size:12.5px;color:var(--muted)}
+.pl-empty{padding:30px;color:var(--muted);text-align:center}
+.pl-cards{display:flex;flex-wrap:wrap;gap:8px;padding:10px}
+.pl-cards div{flex:1 1 160px;padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--panel)}
+.pl-cards b{display:block;font-size:20px;font-variant-numeric:tabular-nums}
+.pl-cards small{color:var(--muted)}
+@media (max-width:920px){.plan{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr)}.pl-side{border-right:0;border-bottom:1px solid var(--line);max-height:42vh}}
+
 /* plantillas */
 .dialog.wide{width:min(860px,100%)}
 .tcard{border:1px solid var(--line);border-radius:8px;background:var(--panel-2);padding:12px 14px;display:flex;flex-direction:column;gap:8px}

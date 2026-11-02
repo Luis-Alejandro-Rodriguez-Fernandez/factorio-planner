@@ -8,6 +8,7 @@ Funciona entero en el navegador: no hay servidor ni cuentas, y los planos que gu
 
 - Tener varios planos abiertos a la vez en páginas (pestañas encima del lienzo), cada uno con su historial de deshacer, su vista y su versión de exportación. Doble clic en una pestaña cambia el nombre y Alt+← / Alt+→ cambian de página.
 - Guardar solo los trabajos abiertos: cada página se guarda en la base de datos del navegador (IndexedDB, con sitio para cientos de MB) poco después de cada cambio, al cambiar de página y al cerrar la pestaña, y vuelve al recargar. La barra de páginas indica si está guardado. Si el navegador no deja usar IndexedDB se usa localStorage, y al cerrar se deja además una copia de rescate de la página activa.
+- Planificar la producción: eliges qué quieres fabricar y a qué ritmo (por ejemplo, 10 circuitos electrónicos por segundo, o todas las ciencias de Nauvis) y el botón «Producción» calcula cada receta de la cadena, cuántas máquinas hacen falta, qué materias primas entran (y cuántas perforadoras o bombas), qué sobra y cuánta electricidad se gasta, con el esquema de toda la cadena dibujado con sus máquinas. Tiene en cuenta módulos, balizas y la productividad base de las máquinas de Space Age; en cada paso puedes cambiar la receta (p. ej. colada en vez de horno) o la máquina, o marcarlo como algo que se trae de fuera.
 - Abrir plantillas de serie para verlas y editarlas. La primera vez que entras se abre el pack **Megabase Vulcano**, un plano por página (ver más abajo).
 - Descargar el plano, todas las páginas o tu biblioteca como un archivo `.txt` con el string del juego, y abrir archivos `.txt` o `.json` con «Importar → Abrir archivo» o soltándolos sobre la ventana. Un libro se puede abrir entero en páginas.
 - Importar planos y libros de planos de Factorio 2.0 y 1.1 con Ctrl+V.
@@ -54,7 +55,7 @@ npm run dev      # abre http://localhost:5173
 
 ### Datos del juego
 
-`src/core/gamedata.js` (edificios con su tamaño, categorías de fabricación de cada máquina y recetas) se genera a partir de los datos oficiales de Factorio. Para actualizarlo cuando salga una versión nueva:
+`src/core/gamedata.js` (edificios con su tamaño, categorías de fabricación de cada máquina, recetas con sus ingredientes, productos y tiempos, velocidad y módulos de cada máquina, y minerales y perforadoras) se genera a partir de los datos oficiales de Factorio. Para actualizarlo cuando salga una versión nueva:
 
 ```bash
 git clone --depth 1 https://github.com/wube/factorio-data /tmp/factorio-data
@@ -114,6 +115,7 @@ src/core/blueprint.js   Códec de strings y conversión entre 1.1 y 2.0
 src/core/rails.js       Geometría de las vías de 2.0
 src/core/gamedata.js    Edificios, máquinas y recetas sacados del juego (generado)
 src/core/presets.js     Plantillas de serie: el pack Megabase Vulcano
+src/core/planner.js     Planificador de producción: recetas, máquinas y materias primas para un ritmo dado
 scripts/                Generador de gamedata.js
 tests/                  Pruebas con Vitest
 public/favicon.svg      Icono
@@ -135,6 +137,7 @@ Los tamaños de los edificios y la posición de sus conexiones de tubería y cal
 - Las entidades se dibujan con formas propias, no con los gráficos del juego.
 - Los nombres de las recetas en español son propios: los datos públicos del juego no traen las traducciones oficiales, así que alguno puede no coincidir con el del juego. El nombre interno, que es el que va en el plano, siempre es el correcto.
 - Los hornos (de piedra, acero, eléctrico) y la recicladora no tienen receta en el plano: en el juego la eligen solos.
+- El planificador usa una receta por producto y aprovecha los subproductos de lo que ya ha calculado, pero no busca la mezcla óptima de recetas (como haría un solver de programación lineal); lo que sobra lo indica aparte. Las balizas se cuentan por máquina y su consumo no se suma, ni tampoco el de las perforadoras.
 - Las curvas y las diagonales son de Factorio 2.0. Al exportar para 1.1, el editor avisa de que esa versión no las reconoce.
 - Las vías elevadas se trazan con el planificador, pero no empalman solas con las rampas: coloca la rampa a mano en su sitio. Las medias diagonales no están en la paleta; si vienen en un plano importado, se muestran y se conservan al exportar.
 - «Mis planos» y las páginas se guardan en el navegador: no pasan a otro equipo ni sobreviven a borrar los datos del sitio. Para tener una copia o llevarla a otro equipo, descárgalas (botón «Descargar» de Mis planos o el de la barra de páginas) y ábrelas allí con «Importar → Abrir archivo».
