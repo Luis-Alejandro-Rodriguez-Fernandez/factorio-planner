@@ -1783,8 +1783,8 @@ async function startPages() {
   }
   const d = LS.get('bpr.draft', null);
   if (d) { pages = [{ id: pageId(), label: '', str: d, n: 0 }]; await showPage(pages[0]); savePages(); toast('Recuperado tu último plano'); return; }
-  // primera visita: el pack de megabase para Vulcano, cada plano en su página y con la ciencia metalúrgica a la vista
-  const dd = presetData(PRESETS[0]), star = dd.list.findIndex(it => /ciencia/i.test(it.bp.label));
+  // primera visita: el pack de megabase para Vulcano, cada plano en su página y con la megabase montada a la vista
+  const dd = presetData(PRESETS[0]), star = dd.list.findIndex(it => /completa/i.test(it.bp.label));
   await openBookPages(dd.list, Math.max(0, star), true, true);
   toast(`Abierto el pack «${PRESETS[0].label}»: ${dd.list.length} planos, uno por página. «Plantillas» lo vuelve a abrir y «Nuevo» empieza un plano vacío.`, 'ok', 7000);
 }

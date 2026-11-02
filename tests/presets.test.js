@@ -9,7 +9,8 @@ const card = d => ((Math.round((d | 0) / 4) % 4) + 4) % 4;
 const K = (x, y) => x + ',' + y;
 const book = vulcanusBook().blueprint_book;
 const plans = BP.flattenBook(book).map(it => ({ label: it.label, bp: it.bp, p: BP.parseBlueprint(it.bp) }));
-const isBlock = pl => !!BP.getSnap(pl.p.meta.extraBp);
+const isBlock = pl => !!BP.getSnap(pl.p.meta.extraBp) && !/completa/.test(pl.label);
+const full = plans.find(pl => /completa/.test(pl.label));
 
 function tilesOf(e) { const [w, h] = sz(def(e.name), e.dir), x0 = Math.round(e.x - w / 2), y0 = Math.round(e.y - h / 2), out = []; for (let y = y0; y < y0 + h; y++) for (let x = x0; x < x0 + w; x++) out.push([x, y]); return out; }
 function occMap(ents) { const m = new Map(); for (const e of ents) for (const [x, y] of tilesOf(e)) m.set(K(x, y), e); return m; }
@@ -58,7 +59,8 @@ const ents = pl => pl.p.ents.map(e => Object.assign({ id: e.num }, e));
 describe('pack «Megabase Vulcano»', () => {
   it('es un libro con todos los bloques y sobrevive al string del juego', async () => {
     expect(PRESETS[0].book().blueprint_book.label).toMatch(/Vulcano/);
-    expect(plans.length).toBe(11);
+    expect(plans.length).toBe(12);
+    expect(full).toBeTruthy();
     const obj = vulcanusBook();
     expect(await BP.decode(BP.encodeSync(obj))).toEqual(obj);
     for (const pl of plans) { expect(pl.p.ents.length).toBeGreaterThan(5); expect(pl.bp.description.length).toBeGreaterThan(40); }
@@ -131,6 +133,10 @@ describe('pack «Megabase Vulcano»', () => {
       const E = ents(pl), net = fluidNets(E), fl = new Map(), src = new Map();
       const add = (m, k, f) => { if (!m.has(k)) m.set(k, new Set()); m.get(k).add(f); };
       for (const e of E) for (const { p, f, role } of portFluids(e)) { const r = net.find(net.node(e.id + ':' + p.k)); add(fl, r, f); if (role === 'out') add(src, r, f); }
+      if (pl === full) for (const e of E) {   // la entrada de ácido que asoma al oeste de la megabase montada
+        const x = Math.floor(e.x), y = Math.floor(e.y); if (x >= 0 || y !== BUS.acid) continue;
+        const r = net.find(net.node('p' + K(x, y))); add(fl, r, 'sulfuric-acid'); add(src, r, 'sulfuric-acid');
+      }
       if (isBlock(pl)) for (const e of E) {
         const k = def(e.name).kind; if (k !== 'pipe' && k !== 'ptg') continue;
         const x = Math.floor(e.x), y = Math.floor(e.y);
@@ -144,6 +150,28 @@ describe('pack «Megabase Vulcano»', () => {
         else if (e.name !== 'offshore-pump') expect(fl.get(r).size === 1 && [...fl.get(r)][0] === f && E.some(o => o !== e && portFluids(o).some(q => q.role === 'in' && q.f === f && net.find(net.node(o.id + ':' + q.p.k)) === r)), `${pl.label}: la salida de ${e.name} en ${e.x},${e.y} no va a ningún sitio`).toBe(true);
       }
     }
+  });
+
+  it('la megabase montada tiene corriente en todo, una sola red de subestaciones y las tomas de lava conectadas', () => {
+    const E = ents(full), subs = E.filter(e => e.name === 'substation'), passive = new Set(['pipe', 'ptg', 'chest', 'pole']);
+    for (const e of E) {
+      if (passive.has(def(e.name).kind) || e.name === 'offshore-pump') continue;
+      const [w, h] = sz(def(e.name), e.dir);
+      expect(subs.some(s => Math.abs(s.x - e.x) < 9 + w / 2 && Math.abs(s.y - e.y) < 9 + h / 2), `${e.name} en ${e.x},${e.y} sin corriente`).toBe(true);
+    }
+    const seen = new Set([subs[0]]), todo = [subs[0]];
+    while (todo.length) { const a = todo.pop(); for (const b of subs) if (!seen.has(b) && Math.hypot(a.x - b.x, a.y - b.y) <= 18) { seen.add(b); todo.push(b); } }
+    expect(seen.size).toBe(subs.length);
+    expect(E.filter(e => e.name === 'roboport').length).toBe(12);
+    // cada toma de lava llega a fundiciones de lava de su fila
+    const net = fluidNets(E);
+    for (const pump of E.filter(e => e.name === 'offshore-pump')) {
+      const r = net.find(net.node(pump.id + ':0'));
+      expect(E.some(o => o.extra && /from-lava/.test(o.extra.recipe || '') && ports(o).some(q => net.find(net.node(o.id + ':' + q.k)) === r)), `bomba en ${pump.x},${pump.y}`).toBe(true);
+    }
+    const sci = /([\d.,]+) packs de ciencia metalúrgica\/s/.exec(full.bp.description); expect(sci).toBeTruthy();
+    const [gen, use] = /dan ([\d.,]+) MW y el conjunto gasta unos ([\d.,]+) MW/.exec(full.bp.description).slice(1).map(v => +v.replace(/\./g, '').replace(',', '.'));
+    expect(gen).toBeGreaterThan(use);
   });
 
   it('las troncales enlazan con el bloque vecino por los dos lados', () => {

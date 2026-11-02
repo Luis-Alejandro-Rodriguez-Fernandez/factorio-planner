@@ -100,6 +100,7 @@ function busTap(p, y) {
 }
 const grid = () => BP.setSnap({}, { w: BLOCK, h: BLOCK, abs: true, ox: 0, oy: 0 });
 function bp(label, description, p, block) {
+  const mw = powerMW(p.ents); if (mw >= 1) description += `\nConsumo eléctrico: unos ${f1(mw)} MW a pleno rendimiento.`;
   const out = BP.buildBlueprint({ ents: p.ents, wires: [], tiles: [], meta: { label, description, extraBp: block === false ? {} : grid() }, target: 2 });
   return out;
 }
@@ -149,7 +150,7 @@ function foundryBlock(o) {
     `Consume ${f1(craftsA * 500)} de lava/s de la troncal de la fila 24 (una bomba costera da 1200/s) y ${f1(craftsA)} de calcita/s; saca ${f1(craftsA * o.stone * RA.prod)} de piedra/s, que puedes convertir en ladrillos o relleno.`,
     o.items ? `Pide por robots ${o.items.map((it, i) => `${f1(crafts * o.per[i])} de ${o.names[i]}/s`).join(' y ')}.` : 'Las placas salen a cofres de suministro pasivo para los robots.',
   ].join('\n');
-  return bp(o.label, desc, p);
+  return Object.assign(bp(o.label, desc, p), { stats: { out, lava: craftsA * 500, calcite: craftsA, items: (o.per || []).map(k => crafts * k) } });
 }
 
 // ----- minería con perforadoras grandes -----
@@ -167,10 +168,10 @@ function miningBlock() {
   }
   busPass(p, BUS.lava); busPass(p, BUS.acid);
   const r = rate('big-mining-drill', 'speed'), per = r.speed / 5;
-  return bp('Minería: tungsteno, calcita o carbón',
+  return Object.assign(bp('Minería: tungsteno, calcita o carbón',
     `${rows.length} perforadoras grandes con 4 módulos de velocidad 3 que dejan el mineral en cofres de suministro pasivo. ` +
     `Colócalo sobre un yacimiento de tungsteno (unos ${f1(rows.length * per)} de mineral/s), de calcita o de carbón (más rápido: tardan menos en extraerse). ` +
-    'La investigación de productividad de minería suma encima. Las perforadoras grandes solo se fabrican en Vulcano y aquí no necesitan fluido.', p);
+    'La investigación de productividad de minería suma encima. Las perforadoras grandes solo se fabrican en Vulcano y aquí no necesitan fluido.', p), { stats: { ore: rows.length * per } });
 }
 
 // ----- química y ensamblaje alrededor de cabeceras de ácido -----
@@ -197,10 +198,10 @@ function carbideBlock() {
   busPass(p, BUS.lava); busPass(p, BUS.acid, PASS.slice(0, 4).concat([[40, 47]])); p.pipe(48, BUS.acid); p.pipe(49, BUS.acid);
   const rc = rate('chemical-plant', 'prod'), ra = rate('assembling-machine-3', 'prod');
   const carbon = 32 * rc.speed * rc.prod, carbide = Math.min(32 * ra.speed * ra.prod, carbon / 1 * ra.prod);
-  return bp('Carbono y carburo de tungsteno',
+  return Object.assign(bp('Carbono y carburo de tungsteno',
     `32 plantas químicas hacen carbono (carbón + ácido) y 32 ensambladoras 3 lo convierten en carburo de tungsteno (mineral de tungsteno + carbono + ácido), todas con módulos de productividad 3. ` +
     `Salen unos ${f1(carbide)} de carburo/s y sobran ${f1(Math.max(0, carbon - 32 * ra.speed))} de carbono/s para otros usos. ` +
-    `Pide por robots ${f1(32 * rc.speed * 2)} de carbón/s y ${f1(32 * ra.speed * 2)} de mineral de tungsteno/s, y toma ${f1(32 * rc.speed * 20 + 32 * ra.speed * 10)} de ácido/s de la troncal de la fila 41.`, p);
+    `Pide por robots ${f1(32 * rc.speed * 2)} de carbón/s y ${f1(32 * ra.speed * 2)} de mineral de tungsteno/s, y toma ${f1(32 * rc.speed * 20 + 32 * ra.speed * 10)} de ácido/s de la troncal de la fila 41.`, p), { stats: { acid: 32 * rc.speed * 20 + 32 * ra.speed * 10, ore: 32 * ra.speed * 2, coal: 32 * rc.speed * 2 } });
 }
 
 // ----- central de vapor a 500 °C: neutralización de ácido y turbinas -----
@@ -216,10 +217,10 @@ function powerBlock() {
   p.chest(15, 44, 'calcite', 50); p.ins(14, 44, 'E'); p.ins(16, 44, 'W');
   busPass(p, BUS.lava); busTap(p, BUS.acid);
   const n = TROWS.length * 9;
-  return bp('Central de vapor (neutralización de ácido)',
+  return Object.assign(bp('Central de vapor (neutralización de ácido)',
     `${n} turbinas de vapor alimentadas por 3 plantas químicas que neutralizan ácido sulfúrico con calcita: vapor a 500 °C, el máximo de la turbina. ` +
     `Da hasta ${f1(n * 5.82)} MW. Consume ${f1(n * 60 / 10)} de ácido/s de la troncal de la fila 41 y ${f1(n * 60 / 1000)} de calcita/s. ` +
-    'En Vulcano el ácido sale de los géiseres con bombas de extracción: llévalo a la troncal.', p);
+    'En Vulcano el ácido sale de los géiseres con bombas de extracción: llévalo a la troncal.', p), { stats: { mw: n * 5.82, acid: n * 6, calcite: n * 0.06 } });
 }
 
 // ----- puerto de exportación: silos de cohetes -----
@@ -239,47 +240,98 @@ function exportBlock() {
 }
 
 // ----- toma de lava: bombas costeras que llenan la troncal -----
+// Bombas en fila (la dirección 0 saca el fluido por el sur), un colector y una bajada que entra en la troncal (fila 24)
+// del bloque cuyo borde está en X: por el oeste (side W) o por el este (side E). Sin bombas en línea: cada una limita a 1200/s.
+function intake(p, side, n, X, Y) {
+  const x0 = side === 'W' ? X - 2 * n : X, col = side === 'W' ? X - 1 : X;
+  for (let i = 0; i < n; i++) p.put('offshore-pump', x0 + 2 * i, Y + BUS.lava - 9, 'N');
+  p.hpipe(x0, side === 'W' ? X - 1 : x0 + 2 * n - 2, Y + BUS.lava - 8); p.vpipe(col, Y + BUS.lava - 7, Y + BUS.lava);
+}
 function lavaIntake() {
-  const p = new Plan();
-  for (let i = 0; i < 4; i++) p.put('offshore-pump', 2 * i, 0, 'N');   // con la dirección 0 la salida queda al sur
-  p.hpipe(0, 9, 1); p.vpipe(9, 2, 4); p.put('pump', 9, 5, 'S'); p.vpipe(9, 7, 9);
+  const p = new Plan(); intake(p, 'W', 4, 8, -BUS.lava + 9);
   return bp('Toma de lava (4 bombas costeras)',
-    'Colócala en la orilla de un lago de lava, con las bombas sobre la lava. Da hasta 4800 de lava/s, suficiente para unos tres bloques de fundición. ' +
-    'Lleva la tubería hasta la fila 24 de un bloque (la troncal de lava) por su borde oeste.', p, false);
+    'Colócala en la orilla de un lago de lava, con las bombas sobre la lava. Da hasta 4800 de lava/s: un bloque de ciencia metalúrgica o tres de fundición. ' +
+    'La bajada termina justo al lado de la fila 24 de un bloque (la troncal de lava): pon el bloque a su derecha. Para más caudal, añade bombas al colector; no metas bombas en línea, que limitan a 1200/s.', p, false);
 }
 
 function baseBlock() {
   const p = new Plan(); skeleton(p); busPass(p, BUS.lava); busPass(p, BUS.acid);
   return bp('Base de bloque 50×50',
     'El esqueleto común: roboport, nueve subestaciones y las troncales de lava (fila 24) y de ácido (fila 41) pasando por debajo. ' +
-    'Úsalo para rellenar huecos de la cuadrícula o como punto de partida de tus propios bloques. Mantén libres las casillas de las troncales y no lleves ninguna otra tubería al borde.', p);
+    'Úsalo para rellenar huecos de la cuadrícula, para llevar la red de robots y la corriente hasta los bloques de minería o como punto de partida de tus propios bloques. Mantén libres las casillas de las troncales y no lleves ninguna otra tubería al borde.', p);
+}
+
+// ----- consumo eléctrico estimado (valores de Factorio 2.0: máquina, módulos y balizas que la alcanzan) -----
+const POWER_KW = { foundry: 2500, 'chemical-plant': 210, 'assembling-machine-3': 375, 'big-mining-drill': 300, 'rocket-silo': 250, beacon: 480, roboport: 2050, 'bulk-inserter': 40 };
+const MOD_E = { 'productivity-module-3': 0.8, 'speed-module-3': 0.7 };
+export function powerMW(ents) {
+  const beacons = ents.filter(e => e.name === 'beacon'); let kw = 0;
+  for (const e of ents) {
+    const base = POWER_KW[e.name]; if (!base) continue;
+    if (e.name === 'beacon' || e.name === 'roboport' || e.name === 'bulk-inserter') { kw += base; continue; }   // roboport cargando robots a tope
+    let c = 1; for (const it of (e.extra && e.extra.items) || []) c += (MOD_E[it.id.name] || 0) * it.items.in_inventory.length;
+    const [w, h] = sz(def(e.name), e.dir), n = beacons.filter(b => Math.abs(b.x - e.x) < 4.5 + w / 2 && Math.abs(b.y - e.y) < 4.5 + h / 2).length;
+    if (n) c += Math.sqrt(n) * 1.5 * 2 * 0.7;
+    kw += base * Math.max(0.2, c);
+  }
+  return kw / 1000;
+}
+
+// ----- la megabase montada: todas las piezas juntas, en proporción -----
+// Fila de arriba (de oeste a este): ciencia metalúrgica, placas de tungsteno, 2 de carburo, 4 centrales y el puerto.
+// Fila de abajo, bajo las últimas centrales y el puerto: hierro, cobre y acero para construir y exportar.
+function megabase(B) {
+  const ents = []; let id = 1;
+  const add = (b, ox, oy) => { for (const e of BP.parseBlueprint(b.blueprint).ents) ents.push({ id: id++, name: e.name, x: e.x + ox, y: e.y + oy, dir: e.dir, extra: e.extra }); };
+  const top = [B.sci, B.plate, B.carb, B.carb, B.power, B.power, B.power, B.power, B.exp], low = [[6, B.iron], [7, B.copper], [8, B.steel]];
+  top.forEach((b, i) => add(b, BLOCK * i, 0)); low.forEach(([c, b]) => add(b, BLOCK * c, BLOCK));
+  const p = new Plan(); p.id = id;
+  intake(p, 'W', 4, 0, 0); intake(p, 'E', 6, BLOCK * top.length, BLOCK);
+  p.hpipe(-3, -1, BUS.acid);   // entrada del ácido de los géiseres
+  ents.push(...p.ents);
+  // cifras
+  const S = k => B[k].stats, ore = S('plate').items[0] + 2 * S('carb').ore, coal = 2 * S('carb').coal;
+  const calcite = ['sci', 'plate', 'iron', 'copper', 'steel'].reduce((a, k) => a + S(k).calcite, 0) + 4 * S('power').calcite;
+  const acid = 2 * S('carb').acid + 4 * S('power').acid, gen = 4 * S('power').mw, use = powerMW(ents);
+  const lavaTop = S('sci').lava + S('plate').lava, lavaLow = S('iron').lava + S('copper').lava + S('steel').lava;
+  const xs = ents.map(e => Math.floor(e.x - sz(def(e.name), e.dir)[0] / 2)), ys = ents.map(e => Math.floor(e.y - sz(def(e.name), e.dir)[1] / 2));
+  const out = BP.buildBlueprint({ ents, wires: [], tiles: [], target: 2, meta: { label: 'Megabase completa (todo montado)',
+    extraBp: BP.setSnap({}, { w: BLOCK, h: BLOCK, abs: true, ox: Math.min(...xs), oy: Math.min(...ys) }),
+    description: [
+      `Todas las piezas juntas y en proporción: ${f1(S('sci').out)} packs de ciencia metalúrgica/s (${f1(S('sci').out * 60)}/min) listos para exportar, y además ${f1(S('iron').out)} placas de hierro/s, ${f1(S('copper').out)} de cobre/s y ${f1(S('steel').out)} de acero/s para construir o vender.`,
+      'Fila de arriba, de oeste a este: ciencia metalúrgica, placas de tungsteno, dos bloques de carburo, cuatro centrales de vapor y el puerto de exportación. Fila de abajo: hierro, cobre y acero.',
+      `Lava: dos tomas que ya vienen en el plano, ${f1(lavaTop)}/s por el oeste de la fila de arriba (4 bombas) y ${f1(lavaLow)}/s por el este de la de abajo (6 bombas). Pon las bombas sobre un lago de lava.`,
+      `Ácido sulfúrico: ${f1(acid)}/s por la tubería que asoma al oeste de la fila de arriba. Tráelo de los géiseres con bombas de extracción.`,
+      `Electricidad: las 4 centrales dan ${f1(gen)} MW y el conjunto gasta unos ${f1(use)} MW a pleno rendimiento.`,
+      `Minería: los robots tienen que recibir unos ${f1(ore)} de mineral de tungsteno/s, ${f1(coal)} de carbón/s y ${f1(calcite)} de calcita/s. Pon ${Math.ceil(ore / S('mine').ore)} bloques de minería sobre tungsteno y uno sobre carbón y otro sobre calcita, y únelos a esta red con bloques base (roboport y subestaciones).`,
+      'El puerto pide además procesadores, estructuras de baja densidad y combustible de cohete para los cohetes.',
+    ].join('\n') } });
+  return out;
 }
 
 export function vulcanusBook() {
   const iron = { cast: 'casting-iron', molten: 20, time: 3.2, out: 2, unit: 'placas de hierro', castLabel: 'hierro', stone: 10 };
   const copper = { cast: 'casting-copper', molten: 20, time: 3.2, out: 2, unit: 'placas de cobre', castLabel: 'cobre', stone: 15 };
-  const kids = [
-    lavaIntake(),
-    baseBlock(),
-    powerBlock(),
-    foundryBlock(Object.assign({}, iron, { label: 'Fundición de hierro', lava: 'molten-iron-from-lava', nA: [2, 2], what: 'Hierro sin minar: la lava y la calcita se funden en hierro fundido y se cuela directamente en placas.' })),
-    foundryBlock(Object.assign({}, copper, { label: 'Fundición de cobre', lava: 'molten-copper-from-lava', nA: [2, 2], what: 'Cobre sin minar: la lava y la calcita se funden en cobre fundido y se cuela en placas.' })),
-    foundryBlock({ label: 'Acero por colada', lava: 'molten-iron-from-lava', cast: 'casting-steel', molten: 30, time: 3.2, out: 1, unit: 'placas de acero', castLabel: 'acero', stone: 10, nA: [3, 3], what: 'Acero directamente del hierro fundido, sin pasar por placas de hierro.' }),
-    miningBlock(),
-    carbideBlock(),
-    foundryBlock({ label: 'Placas de tungsteno', lava: 'molten-iron-from-lava', cast: 'tungsten-plate', molten: 10, time: 10, out: 1, unit: 'placas de tungsteno', castLabel: 'placas de tungsteno', stone: 10, nA: [1, 1], items: ['tungsten-ore'], per: [4], names: ['mineral de tungsteno'], what: 'Placas de tungsteno con mineral de tungsteno y hierro fundido.' }),
-    foundryBlock({ label: 'Ciencia metalúrgica', lava: 'molten-copper-from-lava', cast: 'metallurgic-science-pack', molten: 200, time: 10, out: 1, unit: 'packs de ciencia metalúrgica', castLabel: 'ciencia metalúrgica', stone: 15, nA: [5, 5], items: ['tungsten-carbide', 'tungsten-plate'], per: [3, 2], names: ['carburo de tungsteno', 'placas de tungsteno'], what: 'El producto estrella para exportar: ciencia metalúrgica con cobre fundido de la lava.' }),
-    exportBlock(),
-  ];
+  const B = {
+    lava: lavaIntake(), base: baseBlock(), power: powerBlock(),
+    iron: foundryBlock(Object.assign({}, iron, { label: 'Fundición de hierro', lava: 'molten-iron-from-lava', nA: [2, 2], what: 'Hierro sin minar: la lava y la calcita se funden en hierro fundido y se cuela directamente en placas.' })),
+    copper: foundryBlock(Object.assign({}, copper, { label: 'Fundición de cobre', lava: 'molten-copper-from-lava', nA: [2, 2], what: 'Cobre sin minar: la lava y la calcita se funden en cobre fundido y se cuela en placas.' })),
+    steel: foundryBlock({ label: 'Acero por colada', lava: 'molten-iron-from-lava', cast: 'casting-steel', molten: 30, time: 3.2, out: 1, unit: 'placas de acero', castLabel: 'acero', stone: 10, nA: [3, 3], what: 'Acero directamente del hierro fundido, sin pasar por placas de hierro.' }),
+    mine: miningBlock(), carb: carbideBlock(),
+    plate: foundryBlock({ label: 'Placas de tungsteno', lava: 'molten-iron-from-lava', cast: 'tungsten-plate', molten: 10, time: 10, out: 1, unit: 'placas de tungsteno', castLabel: 'placas de tungsteno', stone: 10, nA: [1, 1], items: ['tungsten-ore'], per: [4], names: ['mineral de tungsteno'], what: 'Placas de tungsteno con mineral de tungsteno y hierro fundido.' }),
+    sci: foundryBlock({ label: 'Ciencia metalúrgica', lava: 'molten-copper-from-lava', cast: 'metallurgic-science-pack', molten: 200, time: 10, out: 1, unit: 'packs de ciencia metalúrgica', castLabel: 'ciencia metalúrgica', stone: 15, nA: [5, 5], items: ['tungsten-carbide', 'tungsten-plate'], per: [3, 2], names: ['carburo de tungsteno', 'placas de tungsteno'], what: 'El producto estrella para exportar: ciencia metalúrgica con cobre fundido de la lava.' }),
+    exp: exportBlock(),
+  };
+  const kids = [megabase(B), B.lava, B.base, B.power, B.iron, B.copper, B.steel, B.mine, B.carb, B.plate, B.sci, B.exp];
   kids.forEach((k, i) => { k.blueprint.label = String(i).padStart(2, '0') + ' · ' + k.blueprint.label; });
   return BP.buildBook('Megabase Vulcano: superproducción y exportación', kids, 2,
     'Pack de bloques de 50×50 con cuadrícula absoluta para Vulcano (Space Age), con robots y sin trenes. ' +
+    'El primer plano es la megabase entera ya montada; los demás son sus piezas sueltas, para ampliarla o construirla por partes. ' +
     'Cada bloque trae roboport y subestaciones que enlazan con los vecinos, y dos troncales que lo cruzan de oeste a este: lava en la fila 24 y ácido sulfúrico en la fila 41. ' +
-    'Empieza por la toma de lava y la central de vapor, mina tungsteno, calcita y carbón, y encadena fundición, carburo, placas de tungsteno y ciencia metalúrgica hasta el puerto de exportación. ' +
     'Proporción a todo gas: cada bloque de ciencia metalúrgica pide unos dos de carburo, uno de placas de tungsteno y dos de minería sobre tungsteno.');
 }
 
 /** Plantillas de serie que ofrece el editor. */
 export const PRESETS = [
-  { id: 'vulcanus', label: 'Megabase Vulcano', sub: 'Superproducción y exportación · 11 planos', book: vulcanusBook },
+  { id: 'vulcanus', label: 'Megabase Vulcano', sub: 'Superproducción y exportación · la megabase montada y sus 11 piezas', book: vulcanusBook },
 ];
