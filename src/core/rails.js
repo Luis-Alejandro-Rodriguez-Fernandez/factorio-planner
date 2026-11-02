@@ -143,3 +143,19 @@ export function planRails(starts, goal) {
   }
   return null;
 }
+
+/**
+ * Trazador de vías: parte de un extremo (x, y) con rumbo de marcha h y va añadiendo piezas del juego.
+ * straight(n): n rectas (o diagonales, según el rumbo); turn(s, n): n tramos de curva de 22,5° hacia s = +1
+ * (sentido horario, a la derecha) o -1 (a la izquierda). Dos tramos son 45° y cuatro, 90°.
+ */
+export function railTurtle(x, y, h) {
+  const M = railMoves(), t = { x, y, h, pieces: [] };
+  const step = pred => {
+    const m = M[t.h].find(pred); if (!m) throw new Error('No hay pieza de vía para seguir desde el rumbo ' + t.h);
+    t.pieces.push({ name: m.name, x: t.x + m.cx, y: t.y + m.cy, dir: m.d, extra: {} }); t.x += m.ex; t.y += m.ey; t.h = m.h;
+  };
+  t.straight = n => { for (let i = 0; i < n; i++) step(m => m.name === 'straight-rail' && m.h === t.h); return t; };
+  t.turn = (s, n) => { for (let i = 0; i < n; i++) step(m => m.name.startsWith('curved-rail') && m.h === (t.h + s + 16) % 16); return t; };
+  return t;
+}

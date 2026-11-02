@@ -6,6 +6,11 @@ Funciona entero en el navegador: no hay servidor ni cuentas, y los planos que gu
 
 ## Qué puedes hacer
 
+- Tener varios planos abiertos a la vez en páginas (pestañas encima del lienzo), cada uno con su historial de deshacer, su vista y su versión de exportación. Doble clic en una pestaña cambia el nombre y Alt+← / Alt+→ cambian de página.
+- Guardar solo los trabajos abiertos: cada página se guarda en la base de datos del navegador (IndexedDB, con sitio para cientos de MB) poco después de cada cambio, al cambiar de página y al cerrar la pestaña, y vuelve al recargar. La barra de páginas indica si está guardado. Si el navegador no deja usar IndexedDB se usa localStorage, y al cerrar se deja además una copia de rescate de la página activa.
+- Planificar la producción: eliges qué quieres fabricar y a qué ritmo (por ejemplo, 10 circuitos electrónicos por segundo, o todas las ciencias de Nauvis) y el botón «Producción» calcula cada receta de la cadena, cuántas máquinas hacen falta, qué materias primas entran (y cuántas perforadoras o bombas), qué sobra y cuánta electricidad se gasta, con el esquema de toda la cadena dibujado con sus máquinas. Tiene en cuenta módulos, balizas y la productividad base de las máquinas de Space Age; en cada paso puedes cambiar la receta (p. ej. colada en vez de horno) o la máquina, o marcarlo como algo que se trae de fuera.
+- Abrir plantillas de serie para verlas y editarlas. La primera vez que entras se abre el pack **Megabase Vulcano**, un plano por página (ver más abajo).
+- Descargar el plano, todas las páginas o tu biblioteca como un archivo `.txt` con el string del juego, y abrir archivos `.txt` o `.json` con «Importar → Abrir archivo» o soltándolos sobre la ventana. Un libro se puede abrir entero en páginas.
 - Importar planos y libros de planos de Factorio 2.0 y 1.1 con Ctrl+V.
 - Construir desde cero con todos los edificios de la Factoriopedia de Factorio 2.0 y Space Age (132 piezas en la paleta), con sus tamaños reales: también vías elevadas, rampas y soportes, el vagón de artillería, coche, tanque y spidertron, los suelos de Space Age y, en «Ocultos y modo editor», cargadores, válvulas, cofres y tuberías infinitos e interfaces de energía y calor para mapas de pruebas.
 - Asignar a cada máquina solo las recetas que puede fabricar: la ensambladora ofrece las suyas, la refinería las del petróleo, la fundición las de metalurgia, etc. (326 recetas con su nombre en español). Puedes buscar por el nombre en español o el interno, asignar una receta a todas las máquinas seleccionadas a la vez y, con la pipeta (Q), seguir colocando máquinas con la misma receta. Los que mueven fluidos o calor muestran sus conexiones, y las tuberías solo se unen donde el edificio tiene una.
@@ -16,6 +21,21 @@ Funciona entero en el navegador: no hay servidor ni cuentas, y los planos que gu
 - Repetir la selección varias veces hacia cualquier lado, con la separación que quieras (Ctrl+D la repite una vez a la derecha), para teselar diseños.
 - Copiar la selección o el plano entero como un string listo para el juego.
 - Exportar para 2.0 o para 1.1, con nombres, direcciones, módulos y cables traducidos.
+
+## Pack «Megabase Vulcano»
+
+Un libro de planos para Vulcano (Space Age) pensado para producir y exportar a lo grande: robots dentro de cada zona y trenes 1-4 entre los puestos mineros y la fábrica. Son bloques de 50×50 con cuadrícula absoluta que encajan entre sí, con suelo de hormigón refinado, borde de hormigón de peligro y lámparas:
+
+- Cada bloque trae un roboport (su zona logística cubre justo el bloque, así que las redes se unen al teselar) y nueve subestaciones que se cablean con las del bloque vecino.
+- Dos troncales cruzan todos los bloques de oeste a este: lava en la fila 24 y ácido sulfúrico en la fila 41. Los bloques que no las usan las pasan por debajo con tuberías subterráneas, y ninguna otra tubería llega al borde, así que los fluidos de bloques vecinos no se mezclan.
+- **Megabase completa (todo montado)**: el primer plano del libro junta todas las piezas en proporción, en dos filas de bloques con sus dos tomas de lava y una franja de tren. Da ~18 packs de ciencia metalúrgica/s (~1077/min) para exportar, más ~125 placas de hierro/s, ~125 de cobre/s y ~63 de acero/s. Sus 4 centrales dan ~2300 MW para un consumo de ~1550 MW (unos 1900 con los puestos mineros). Solo hay que traerle ácido sulfúrico de los géiseres y unir por vía los puestos mineros, que van sobre los yacimientos; la descripción del plano dice cuánto de cada cosa.
+- **Trenes 1-4** (una locomotora y cuatro vagones): línea de doble vía con circulación por la derecha y señales, curva de doble vía, retornos para los extremos y estaciones en apartadero (48 insertadores masivos por estación, para que un tren parado no corte la línea). La megabase montada trae al norte una franja de tren con dos estaciones de descarga y un retorno; los **puestos mineros** de tungsteno, carbón y calcita traen su estación de carga, un tren aparcado con su horario (cargar hasta llenar, descargar hasta vaciar) y su retorno. Las piezas de vía llevan subestaciones, así que la corriente llega a las minas junto a la vía.
+- Bloques: toma de lava, base vacía, central de vapor (99 turbinas, ~576 MW con neutralización de ácido), fundición de hierro y de cobre (~125 placas/s cada una), acero por colada (~63/s), minería con perforadoras grandes, carbono y carburo de tungsteno, placas de tungsteno, ciencia metalúrgica (~18 packs/s) y un puerto de exportación con 4 silos de cohetes.
+- Módulos de nivel 2, que no piden huevos de mordedor ni carburo: las coladas llevan productividad 2 y una fila de balizas con velocidad 2; las fundiciones de lava, las perforadoras y los silos llevan velocidad 2. Cada plano explica en su descripción qué consume y qué produce, con cifras sacadas de las recetas del juego.
+
+Los procesadores y el combustible de cohete del puerto de exportación no se fabrican en el pack: suelen llegar de otro planeta.
+
+El pack se genera en `src/core/presets.js`. `tests/presets.test.js` comprueba cada plano: que nada se solape, que cada máquina pueda fabricar su receta, que todo tenga corriente, que cada insertador coja de un sitio y deje en otro en el sentido correcto, que las perforadoras echen en un cofre, que ninguna red de tuberías mezcle fluidos y que cada entrada de fluido reciba el suyo. En los trenes comprueba que las vías empalmen y solo queden sueltos los extremos por donde sigue la línea, que señales y paradas estén en sitios válidos, que cada vagón tenga 12 insertadores enfrente y que los horarios apunten a las paradas correctas.
 
 ## Arranque rápido
 
@@ -29,13 +49,13 @@ npm run dev      # abre http://localhost:5173
 | Comando | Qué hace |
 | --- | --- |
 | `npm run dev` | Servidor de desarrollo que recarga al guardar |
-| `npm test` | Pruebas del códec de strings, de los libros de planos y de la geometría de vías |
+| `npm test` | Pruebas del códec de strings, de los libros de planos, de la geometría de vías y del pack de Vulcano |
 | `npm run build` | Genera la versión de producción en `dist/` |
 | `npm run preview` | Sirve `dist/` para revisarla antes de publicar |
 
 ### Datos del juego
 
-`src/core/gamedata.js` (edificios con su tamaño, categorías de fabricación de cada máquina y recetas) se genera a partir de los datos oficiales de Factorio. Para actualizarlo cuando salga una versión nueva:
+`src/core/gamedata.js` (edificios con su tamaño, categorías de fabricación de cada máquina, recetas con sus ingredientes, productos y tiempos, velocidad y módulos de cada máquina, y minerales y perforadoras) se genera a partir de los datos oficiales de Factorio. Para actualizarlo cuando salga una versión nueva:
 
 ```bash
 git clone --depth 1 https://github.com/wube/factorio-data /tmp/factorio-data
@@ -94,6 +114,8 @@ src/editor.js           Lienzo, herramientas, paneles y portapapeles
 src/core/blueprint.js   Códec de strings y conversión entre 1.1 y 2.0
 src/core/rails.js       Geometría de las vías de 2.0
 src/core/gamedata.js    Edificios, máquinas y recetas sacados del juego (generado)
+src/core/presets.js     Plantillas de serie: el pack Megabase Vulcano
+src/core/planner.js     Planificador de producción: recetas, máquinas y materias primas para un ritmo dado
 scripts/                Generador de gamedata.js
 tests/                  Pruebas con Vitest
 public/favicon.svg      Icono
@@ -115,9 +137,11 @@ Los tamaños de los edificios y la posición de sus conexiones de tubería y cal
 - Las entidades se dibujan con formas propias, no con los gráficos del juego.
 - Los nombres de las recetas en español son propios: los datos públicos del juego no traen las traducciones oficiales, así que alguno puede no coincidir con el del juego. El nombre interno, que es el que va en el plano, siempre es el correcto.
 - Los hornos (de piedra, acero, eléctrico) y la recicladora no tienen receta en el plano: en el juego la eligen solos.
+- El planificador usa una receta por producto y aprovecha los subproductos de lo que ya ha calculado, pero no busca la mezcla óptima de recetas (como haría un solver de programación lineal); lo que sobra lo indica aparte. Las balizas se cuentan por máquina y su consumo no se suma, ni tampoco el de las perforadoras.
 - Las curvas y las diagonales son de Factorio 2.0. Al exportar para 1.1, el editor avisa de que esa versión no las reconoce.
 - Las vías elevadas se trazan con el planificador, pero no empalman solas con las rampas: coloca la rampa a mano en su sitio. Las medias diagonales no están en la paleta; si vienen en un plano importado, se muestran y se conservan al exportar.
-- «Mis planos» se guarda en el navegador. Para tener una copia o llevarla a otro equipo, usa «Copiar todo como libro» e impórtalo allí con «Importar libro».
+- «Mis planos» y las páginas se guardan en el navegador: no pasan a otro equipo ni sobreviven a borrar los datos del sitio. Para tener una copia o llevarla a otro equipo, descárgalas (botón «Descargar» de Mis planos o el de la barra de páginas) y ábrelas allí con «Importar → Abrir archivo».
+- El pack de Vulcano se ha comprobado con las reglas del juego que conoce el editor (tamaños, recetas, conexiones de fluidos, alcance de subestaciones y balizas), no dentro de Factorio. Si algo no encaja en tu partida, ajústalo aquí y vuelve a exportarlo.
 
 ## Contribuir
 

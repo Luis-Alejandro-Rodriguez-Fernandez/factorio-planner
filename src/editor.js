@@ -1,4 +1,7 @@
 import { BP } from './core/blueprint.js';
+import { PRESETS } from './core/presets.js';
+import { plan, products, producers, machinesFor, itemName, recipeLabel, isFluid, recipe, MODULES, BELTS } from './core/planner.js';
+import { DRILLS } from './core/gamedata.js';
 import { HV, rotQ, normDir, railKey, railEndsOf, tmplVariants, tmplMQ, tmplPieces, tmplEnds, slotsAtEnd, railMoves, planRails } from './core/rails.js';
 
 /* ===== Editor: estado, historial, índice y dibujo ===== */
@@ -513,7 +516,9 @@ function draw() {
   c.fillStyle = TH.bg; c.fillRect(0, 0, CW, CH);
   const wx0 = V.ox, wy0 = V.oy, wx1 = V.ox + CW / s, wy1 = V.oy + CH / s;
   const SX = x => (x - V.ox) * s, SY = y => (y - V.oy) * s;
-  for (const t of S.tiles.values()) { if (t.x + 1 < wx0 || t.x > wx1 || t.y + 1 < wy0 || t.y > wy1) continue; drawTile(c, t.name, SX(t.x), SY(t.y), s); }
+  if (s < 8 && S.tiles.size > 2000) {   // de lejos, el suelo se pinta por franjas de casillas iguales: miles de rectángulos menos
+    for (const [y, runs] of tileRuns()) { if (y + 1 < wy0 || y > wy1) continue; for (const [x0, x1, name] of runs) { if (x1 + 1 < wx0 || x0 > wx1) continue; c.fillStyle = tileDef(name).color; c.fillRect(SX(x0), SY(y), (x1 - x0 + 1) * s + .6, s + .6); } }
+  } else for (const t of S.tiles.values()) { if (t.x + 1 < wx0 || t.x > wx1 || t.y + 1 < wy0 || t.y > wy1) continue; drawTile(c, t.name, SX(t.x), SY(t.y), s); }
   // rejilla
   if (showGrid) {
     if (s >= 7) { c.beginPath(); for (let x = Math.floor(wx0); x <= wx1; x++) { const X = Math.round(SX(x)) + .5; c.moveTo(X, 0); c.lineTo(X, CH); } for (let y = Math.floor(wy0); y <= wy1; y++) { const Yy = Math.round(SY(y)) + .5; c.moveTo(0, Yy); c.lineTo(CW, Yy); } c.strokeStyle = TH.grid; c.lineWidth = 1; c.stroke(); }
@@ -581,6 +586,20 @@ function draw() {
     const x0 = Math.min(P.x0, P.x1), y0 = Math.min(P.y0, P.y1), w = Math.abs(P.x1 - P.x0), h = Math.abs(P.y1 - P.y0);
     c.fillStyle = 'rgba(255,155,31,.12)'; c.fillRect(SX(x0), SY(y0), w * s, h * s); c.strokeStyle = TH.acc; c.lineWidth = 1.5; c.setLineDash([5, 4]); c.strokeRect(SX(x0) + .5, SY(y0) + .5, w * s, h * s); c.setLineDash([]);
   }
+}
+// franjas de suelo por fila [x0, x1, nombre], rehechas cuando cambia el plano
+let TRV = -1, TRC = null;
+function tileRuns() {
+  if (TRV === mmVer && TRC) return TRC;
+  const rows = new Map();
+  for (const t of S.tiles.values()) { let r = rows.get(t.y); if (!r) rows.set(t.y, r = []); r.push(t); }
+  TRC = new Map();
+  for (const [y, r] of rows) {
+    r.sort((a, b) => a.x - b.x); const out = []; let cur = null;
+    for (const t of r) { if (cur && t.name === cur[2] && t.x === cur[1] + 1) cur[1] = t.x; else out.push(cur = [t.x, t.x, t.name]); }
+    TRC.set(y, out);
+  }
+  TRV = mmVer; return TRC;
 }
 function frame(t) { navStep(t); if (dirty) { dirty = false; draw(); drawMini(); } requestAnimationFrame(frame); }
 /* ===== Interacción ===== */
@@ -1039,6 +1058,7 @@ window.addEventListener('keydown', e => {
   if (e.key === 'Escape') { const m = document.querySelector('.modal:not([hidden])'); if (m) { closeModal(m); return; } }
   if (typing(e.target) || modalOpen()) return;
   const k = e.key.toLowerCase(), mod = e.ctrlKey || e.metaKey;
+  if (e.altKey && !mod && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) { e.preventDefault(); stepPage(e.key === 'ArrowLeft' ? -1 : 1); return; }
   if (mod) {
     if (k === 'c' || k === 'x') {
       if (sel.size || selT.size) { const g = selGroup(); clip = g; armClip(k === 'x' ? 'cut' : 'copy', groupString(g), g.ents.length); }
@@ -1145,17 +1165,21 @@ function drawMini() {
     T = { s, ox: (W - (x1 - x0) * s) / 2 - x0 * s, oy: (H - (y1 - y0) * s) / 2 - y0 * s };
   }
   mmT = T;
-  const key = [mmVer, pw, ph, T.s.toPrecision(6), T.ox.toFixed(1), T.oy.toFixed(1)].join();
-  if (key !== mmKey) {   // el contenido solo se vuelve a pintar si cambió el plano o el encuadre
-    mmKey = key; mmBuf.width = pw; mmBuf.height = ph;
-    const b = mmBuf.getContext('2d'), { s, ox, oy } = T, m = 1 / DPR;
-    b.setTransform(DPR, 0, 0, DPR, 0, 0); b.fillStyle = TH.bg; b.fillRect(0, 0, W, H);
-    for (const t of S.tiles.values()) { b.fillStyle = tileDef(t.name).color; b.fillRect(ox + t.x * s, oy + t.y * s, Math.max(s, m), Math.max(s, m)); }
-    for (const e of S.ents.values()) if (def(e.name).kind === 'rail') drawRailBed(b, e, ox, oy, Math.min(s, 6));
-    for (const e of S.ents.values()) { const d = def(e.name); if (d.kind === 'rail') continue; const r = bb(e); b.fillStyle = d.color; b.fillRect(ox + r.x * s, oy + r.y * s, Math.max(r.w * s, m), Math.max(r.h * s, m)); }
+  // el contenido se pinta una sola vez por versión del plano, encuadrado en su caja; al mover la vista solo se reescala
+  const cb = contentBox(), pd = Math.max(1, Math.max(cb.x1 - cb.x0, cb.y1 - cb.y0) * .02), bx0 = cb.x0 - pd, by0 = cb.y0 - pd, bw = cb.x1 - cb.x0 + 2 * pd, bh = cb.y1 - cb.y0 + 2 * pd;
+  const key = [mmVer, pw, ph].join();
+  if (key !== mmKey) {
+    mmKey = key; const sc = Math.min(pw * 1.5 / bw, ph * 1.5 / bh, 12);   // píxeles por casilla del lienzo intermedio
+    mmBuf.width = Math.max(1, Math.ceil(bw * sc)); mmBuf.height = Math.max(1, Math.ceil(bh * sc));
+    const b = mmBuf.getContext('2d'), ox = -bx0 * sc, oy = -by0 * sc;
+    b.setTransform(1, 0, 0, 1, 0, 0); b.clearRect(0, 0, mmBuf.width, mmBuf.height);
+    for (const t of S.tiles.values()) { b.fillStyle = tileDef(t.name).color; b.fillRect(ox + t.x * sc, oy + t.y * sc, Math.max(sc, 1), Math.max(sc, 1)); }
+    for (const e of S.ents.values()) if (def(e.name).kind === 'rail') drawRailBed(b, e, ox, oy, Math.min(sc, 6));
+    for (const e of S.ents.values()) { const d = def(e.name); if (d.kind === 'rail') continue; const r = bb(e); b.fillStyle = d.color; b.fillRect(ox + r.x * sc, oy + r.y * sc, Math.max(r.w * sc, 1), Math.max(r.h * sc, 1)); }
   }
-  const c = mmc; c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, pw, ph); c.drawImage(mmBuf, 0, 0);
-  c.setTransform(DPR, 0, 0, DPR, 0, 0);
+  const c = mmc; c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, pw, ph);
+  c.setTransform(DPR, 0, 0, DPR, 0, 0); c.fillStyle = TH.bg; c.fillRect(0, 0, W, H);
+  c.drawImage(mmBuf, T.ox + bx0 * T.s, T.oy + by0 * T.s, bw * T.s, bh * T.s);
   const rx = T.ox + vx0 * T.s, ry = T.oy + vy0 * T.s, rw = Math.max(3, (vx1 - vx0) * T.s), rh = Math.max(3, (vy1 - vy0) * T.s);
   c.fillStyle = TH.acc; c.globalAlpha = .16; c.fillRect(rx, ry, rw, rh); c.globalAlpha = 1;
   c.strokeStyle = TH.acc; c.lineWidth = 1.5; c.strokeRect(rx + .75, ry + .75, rw - 1.5, rh - 1.5);
@@ -1178,7 +1202,7 @@ function toast(msg, kind, ms) {
   setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 300); }, ms || (kind === 'err' ? 5000 : 2800));
 }
 let panelT = 0, saveT = 0, selT_ = 0;
-function changed() { idxDirty = true; dirty = true; clearTimeout(panelT); panelT = setTimeout(() => { renderSel(); renderContents(); }, 60); clearTimeout(saveT); saveT = setTimeout(saveDraft, 900); updateEmpty(); updateStatus(); }
+function changed() { idxDirty = true; dirty = true; clearTimeout(panelT); panelT = setTimeout(() => { renderSel(); renderContents(); renderPages(); }, 60); clearTimeout(saveT); saveT = setTimeout(saveDraft, 900); updateEmpty(); updateStatus(); }
 function renderSelSoon() { clearTimeout(selT_); selT_ = setTimeout(renderSel, 50); }
 function updateEmpty() { $('#empty').hidden = !!(S.ents.size || S.tiles.size || mode !== 'select'); }
 function updateStatus() {
@@ -1428,11 +1452,14 @@ function importObject(obj, how, srcText) {
 function loadBp(bp, how) {
   const parsed = BP.parseBlueprint(bp);
   if (!parsed.ents.length && !parsed.tiles.length) return toast('El plano no tiene entidades ni suelos', 'warn');
-  if (how === 'hold') holdGroup(instantiate(parsed), `«${parsed.meta.label || 'Plano'}» en el cursor (${parsed.ents.length} entidades): clic para colocarlo, Mayús+clic reemplaza, Esc lo suelta.`);
-  else { openParsed(parsed); toast(`Abierto «${parsed.meta.label || 'Plano sin nombre'}»: ${parsed.ents.length} entidades, versión ${BP.verStr(parsed.meta.version)}`, 'ok'); }
+  if (how === 'hold') return holdGroup(instantiate(parsed), `«${parsed.meta.label || 'Plano'}» en el cursor (${parsed.ents.length} entidades): clic para colocarlo, Mayús+clic reemplaza, Esc lo suelta.`);
+  const fresh = how !== 'replace' && !isEmptyS();   // si la página actual tiene algo, se abre en otra página
+  if (fresh) addPage(null);
+  openParsed(parsed); renderPages(); saveDraft();
+  toast(`Abierto «${parsed.meta.label || 'Plano sin nombre'}»${fresh ? ' en una página nueva' : ''}: ${parsed.ents.length} entidades, versión ${BP.verStr(parsed.meta.version)}`, 'ok');
 }
 function showBook(list, how, label) {
-  const ul = $('#imp-book'); pendingBook = { list, label: label || 'Libro importado' }; ul.hidden = false; $('#imp-lib').hidden = false;
+  const ul = $('#imp-book'); pendingBook = { list, label: label || 'Libro importado' }; ul.hidden = false; $('#imp-lib').hidden = false; $('#imp-pages').hidden = false;
   ul.innerHTML = list.map((it, i) => `<li><span title="${esc(it.label)}">${esc(it.label)}</span><small class="hint" style="margin:0">${it.n} ent.</small><button class="btn small" data-h="${i}">Al cursor</button><button class="btn small primary" data-o="${i}">Abrir</button></li>`).join('');
   ul.querySelectorAll('button').forEach(b => b.onclick = () => { const it = list[+(b.dataset.o ?? b.dataset.h)]; closeModal($('#m-import')); loadBp(it.bp, b.dataset.o != null ? 'open' : 'hold'); });
   $('#imp-sum').textContent = `Libro de planos con ${list.length} planos. Elige cuál abrir:`; $('#imp-err').textContent = '';
@@ -1440,7 +1467,7 @@ function showBook(list, how, label) {
 let impT = 0;
 function checkImport() {
   clearTimeout(impT); impT = setTimeout(async () => {
-    const t = $('#imp-text').value; $('#imp-book').hidden = true; $('#imp-lib').hidden = true; pendingBook = null; $('#imp-err').textContent = ''; $('#imp-sum').textContent = '';
+    const t = $('#imp-text').value; $('#imp-book').hidden = true; $('#imp-lib').hidden = true; $('#imp-pages').hidden = true; pendingBook = null; $('#imp-err').textContent = ''; $('#imp-sum').textContent = '';
     if (!t.trim()) return;
     try { const o = await BP.decode(t);
       if (o.blueprint_book) return showBook(BP.flattenBook(o.blueprint_book), 'open', o.blueprint_book.label);
@@ -1458,6 +1485,8 @@ async function doImport(how) {
 }
 $('#imp-open').onclick = () => doImport('open');
 $('#imp-lib').onclick = () => { if (pendingBook && pendingBook.list.length) openSave('book', pendingBook); };
+$('#imp-pages').onclick = async () => { if (!pendingBook || !pendingBook.list.length) return; closeModal($('#m-import')); await openBookPages(pendingBook.list); };
+$('#imp-file').onclick = () => $('#file-in').click();
 $('#imp-hold').onclick = () => doImport('hold');
 $('#imp-paste').onclick = async () => {
   try { const t = await navigator.clipboard.readText(); $('#imp-text').value = t; checkImport(); }
@@ -1465,11 +1494,11 @@ $('#imp-paste').onclick = async () => {
 };
 
 // ----- exportar -----
-function fullBp() {
+function fullBp(T) {
   S.meta.label = $('#bp-label').value.trim(); S.meta.description = $('#bp-desc').value.trim();
   const ents = [...S.ents.values()], tiles = [...S.tiles.values()];
   const meta = Object.assign({}, S.meta, { extraBp: snapExtra(S.meta.extraBp, BP.getSnap(S.meta.extraBp), { ents, tiles }) });
-  return BP.buildBlueprint({ ents, wires: S.wires, tiles, meta, target: S.target });
+  return BP.buildBlueprint({ ents, wires: S.wires, tiles, meta, target: T || S.target });
 }
 function rails20() { let n = 0; for (const e of S.ents.values()) { const d = def(e.name); if (d.kind === 'rail' && (d.rt !== 'S' || e.dir % 4 === 2 || d.elev)) n++; } return n; }
 async function copyAll() {
@@ -1492,7 +1521,7 @@ let exTab = 'str';
 function setTab(t) { exTab = t; document.querySelectorAll('#m-export [data-tab]').forEach(b => b.classList.toggle('on', b.dataset.tab === t)); $('#ex-str').hidden = t !== 'str'; $('#ex-json').hidden = t !== 'json'; $('#ex-apply').hidden = t !== 'json'; $('#ex-copy').textContent = t === 'json' ? 'Copiar JSON' : 'Copiar string'; }
 document.querySelectorAll('#m-export [data-tab]').forEach(b => b.onclick = () => setTab(b.dataset.tab));
 $('#ex-copy').onclick = async () => { const ta = exTab === 'json' ? $('#ex-jtext') : $('#ex-text'); const ok = await writeClip(ta.value); if (!ok) { ta.focus(); ta.select(); } toast(ok ? 'Copiado al portapapeles' : 'Selecciona el texto y pulsa Ctrl+C', ok ? 'ok' : 'warn'); };
-$('#ex-apply').onclick = () => { try { const o = JSON.parse($('#ex-jtext').value); closeModal($('#m-export')); importObject(o, 'open'); } catch (e) { $('#ex-err').textContent = 'JSON no válido: ' + e.message; } };
+$('#ex-apply').onclick = () => { try { const o = JSON.parse($('#ex-jtext').value); closeModal($('#m-export')); importObject(o, 'replace'); } catch (e) { $('#ex-err').textContent = 'JSON no válido: ' + e.message; } };
 
 // ----- modales -----
 let lastFocus = null;
@@ -1541,7 +1570,7 @@ function libMeta(it) {
 function renderLib() {
   const root = $('#lib-list'), q = norm($('#lib-q').value.trim());
   $('#dl-folders').innerHTML = libFolders().filter(Boolean).map(f => `<option value="${esc(f)}">`).join('');
-  $('#lib-book').disabled = !lib.length;
+  $('#lib-book').disabled = $('#lib-down').disabled = !lib.length;
   if (!lib.length) { root.innerHTML = '<p class="hint">Aún no has guardado nada. Selecciona una parte de tu diseño y pulsa «Guardar selección» para tenerla a mano como fragmento.</p>'; return; }
   const view = lib.filter(it => !q || norm(it.name + ' ' + (it.folder || '')).includes(q));
   if (!view.length) { root.innerHTML = '<p class="hint">Nada coincide con la búsqueda.</p>'; return; }
@@ -1564,7 +1593,7 @@ $('#lib-list').addEventListener('click', async e => {
   if (!b) { const was = li.classList.contains('open'); $('#lib-list').querySelectorAll('li.open').forEach(x => x.classList.remove('open')); li.classList.toggle('open', !was); return; }
   const a = b.dataset.a;
   if (a === 'hold' || a === 'open') {
-    try { const o = await BP.decode(it.str); if (!o.blueprint) throw new Error('No contiene un plano'); if (a === 'open' && (S.ents.size || S.tiles.size) && !(await askConfirm(`¿Abrir «${it.name}»?`, 'Sustituye lo que hay en el lienzo. Si solo quieres añadirlo, usa «Colocar».', 'Abrir'))) return; loadBp(o.blueprint, a); }
+    try { const o = await BP.decode(it.str); if (!o.blueprint) throw new Error('No contiene un plano'); loadBp(o.blueprint, a); }
     catch (err) { toast(err.message, 'err'); }
     $('#side').classList.remove('open'); return;
   }
@@ -1580,8 +1609,8 @@ function libAdd(items) {
   lib = prev; toast('No se pudo guardar: el navegador no tiene más sitio o no permite guardar datos aquí. Borra algún plano o copia el string para conservarlo.', 'warn', 6000); return false;
 }
 // libro de planos: con folders, una subcarpeta por carpeta
-async function copyBook(items, label, folders) {
-  if (!items.length) return toast('No hay planos que copiar', 'warn');
+async function copyBook(items, label, folders, download) {
+  if (!items.length) return toast(download ? 'No hay planos que descargar' : 'No hay planos que copiar', 'warn');
   const bpOf = async it => { try { const o = await BP.decode(it.str); return o.blueprint ? { blueprint: Object.assign({}, o.blueprint, { label: it.name }) } : null; } catch (e) { return null; } };
   const kids = [];
   if (folders) {
@@ -1591,11 +1620,14 @@ async function copyBook(items, label, folders) {
       if (f) kids.push(BP.buildBook(f, bps, S.target)); else kids.push(...bps);
     }
   } else kids.push(...(await Promise.all(items.map(bpOf))).filter(Boolean));
-  const ok = await writeClip(BP.encodeSync(BP.buildBook(label, kids, S.target)));
+  const str = BP.encodeSync(BP.buildBook(label, kids, S.target));
+  if (download) return downloadText(label, str, `Libro «${label}» descargado (${items.length} planos). Ábrelo aquí con «Importar → Abrir archivo» o pega su contenido en Factorio.`);
+  const ok = await writeClip(str);
   toast(ok ? `Libro «${label}» copiado (${items.length} planos, para Factorio ${S.target === 1 ? '1.1' : '2.0'}). En el juego: «Importar cadena».` : 'El navegador bloqueó el portapapeles', ok ? 'ok' : 'warn', 4500);
 }
 $('#lib-book').onclick = () => copyBook(lib, 'Mis planos', true);
-$('#lib-import').onclick = () => { openModal('m-import'); $('#imp-text').value = ''; checkImport(); toast('Pega un libro de planos y pulsa «Guardar libro en Mis planos»'); };
+$('#lib-down').onclick = () => copyBook(lib, 'Mis planos', true, true);
+$('#lib-import').onclick = () => { openModal('m-import'); $('#imp-text').value = ''; checkImport(); toast('Pega o abre un libro de planos y pulsa «Guardar libro en Mis planos»'); };
 
 // ----- diálogo de guardado: plano completo, selección (fragmento), edición o libro importado -----
 let SV = null;
@@ -1654,8 +1686,411 @@ $('#sv-ok').onclick = async () => {
 $('#m-save').addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.tagName === 'INPUT' && e.target.type !== 'checkbox') { e.preventDefault(); $('#sv-ok').click(); } });
 $('#lib-save').onclick = () => openSave('plan');
 $('#lib-save-sel').onclick = () => openSave('sel');
-async function saveDraft() { try { if (!S.ents.size && !S.tiles.size) { localStorage.removeItem('bpr.draft'); return; } LS.set('bpr.draft', await BP.encode(fullBp())); } catch (e) { } }
+function saveDraft() { clearTimeout(saveT); savePages(); }
 function renderBpSrc() { $('#bp-src').textContent = S.meta.version ? `Importado de Factorio ${BP.verStr(S.meta.version)}.${S.meta.scheme !== S.target ? ' Al convertir de versión se traducen nombres y direcciones; revisa filtros y combinadores.' : ''}` : 'Si ya lo usas en el juego, elige la misma versión que tengas instalada.'; }
+
+// ----- páginas: varios planos abiertos a la vez, cada uno con su historial, su vista y su versión de exportación -----
+// La página activa vive en S; las demás guardan su string (y, mientras dura la sesión, su estado con el historial).
+// Todas se guardan en este navegador (bpr.pages) y vuelven al recargar.
+let pages = [], pageCur = null, pageSeq = 0, pageRenaming = false, pageWarned = false, pageOnId = null;
+const pageId = () => 'pg' + Date.now().toString(36) + (pageSeq++).toString(36);
+function isEmptyS() { return !S.ents.size && !S.tiles.size; }
+function detach() { S.ents = new Map(); S.tiles = new Map(); S.wires = []; S.nextId = 1; S.meta = newMeta(); UNDO.length = 0; REDO.length = 0; TX = null; sel.clear(); selT.clear(); idxDirty = true; dirty = true; }
+function writePage(pg) {
+  S.meta.label = $('#bp-label').value.trim(); S.meta.description = $('#bp-desc').value.trim();
+  Object.assign(pg, { label: S.meta.label, n: S.ents.size, target: S.target, ver: S.meta.version, view: { ox: V.ox, oy: V.oy, s: V.s } });
+  pg.str = isEmptyS() ? '' : BP.encodeSync(fullBp(2));   // siempre en 2.0 para no perder nada; la versión de exportación va aparte
+}
+function stashPage() {
+  const pg = pageCur; if (!pg) return;
+  if (TX) txCommit(); RP = null; P = null; if (mode === 'hold' || mode === 'place') setMode('select');
+  writePage(pg);
+  pg.live = { ents: S.ents, tiles: S.tiles, wires: S.wires, nextId: S.nextId, meta: S.meta, target: S.target, undo: UNDO.slice(), redo: REDO.slice() };
+  detach();
+}
+async function showPage(pg) {
+  pageCur = pg; detach();
+  if (pg.live) {
+    const L = pg.live; pg.live = null;
+    Object.assign(S, { ents: L.ents, tiles: L.tiles, wires: L.wires, nextId: L.nextId, meta: L.meta, target: L.target }); UNDO.push(...L.undo); REDO.push(...L.redo);
+    $('#bp-target').value = String(S.target); $('#bp-label').value = S.meta.label || ''; $('#bp-desc').value = S.meta.description || '';
+    renderSnap(); setMode('select'); changed(); renderBpSrc();
+  } else {
+    let parsed = null;
+    if (pg.str) { try { const o = await BP.decode(pg.str); if (o.blueprint) parsed = BP.parseBlueprint(o.blueprint); } catch (e) { toast(`No se pudo abrir la página «${pg.label || 'Sin nombre'}»: ${e.message}`, 'err'); } }
+    if (pageCur !== pg) return;   // mientras tanto se eligió otra página
+    openParsed(parsed || { ents: [], tiles: [], wires: [], meta: newMeta() });
+    if (pg.target) S.target = pg.target; if ('ver' in pg) S.meta.version = pg.ver;
+    $('#bp-target').value = String(S.target); renderBpSrc();
+  }
+  if (pg.view) { V.ox = pg.view.ox; V.oy = pg.view.oy; V.s = clamp(pg.view.s || 32, 2, 128); }
+  hover.inside = false; dirty = true; updateStatus(); renderPages();
+}
+// ----- almacén local: IndexedDB (sitio para cientos de MB), con localStorage de reserva si el navegador no lo deja usar -----
+const DB = (() => {
+  let dbp = null;
+  const open = () => dbp || (dbp = new Promise((res, rej) => {
+    try { const r = indexedDB.open('blueprinter', 1); r.onupgradeneeded = () => r.result.createObjectStore('kv'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); r.onblocked = () => rej(new Error('bloqueada')); }
+    catch (e) { rej(e); }
+  }));
+  const run = async (mode, fn) => { const db = await open(); return new Promise((res, rej) => { const t = db.transaction('kv', mode), rq = fn(t.objectStore('kv')); t.oncomplete = () => res(rq.result); t.onerror = t.onabort = () => rej(t.error || new Error('transacción cancelada')); }); };
+  return {
+    async get(k) { try { return await run('readonly', st => st.get(k)); } catch (e) { return LS.get('bpr.kv.' + k, undefined); } },
+    async set(k, v) { try { await run('readwrite', st => st.put(v, k)); return true; } catch (e) { return LS.set('bpr.kv.' + k, v); } },
+    // varias escrituras y borrados en una sola transacción: o se guardan todas o ninguna
+    async batch(puts, dels) {
+      try { await run('readwrite', st => { let rq = null; for (const [k, v] of puts) rq = st.put(v, k); for (const k of dels || []) rq = st.delete(k); return rq || st.count(); }); return true; }
+      catch (e) { let ok = true; for (const [k, v] of puts) ok = LS.set('bpr.kv.' + k, v) && ok; for (const k of dels || []) { try { localStorage.removeItem('bpr.kv.' + k); } catch (_) { } } return ok; }
+    },
+    async del(k) { try { await run('readwrite', st => st.delete(k)); } catch (e) { } try { localStorage.removeItem('bpr.kv.' + k); } catch (e) { } },
+  };
+})();
+// Las páginas se guardan por separado (índice + un registro por página) y solo se reescribe la que cambió.
+const savedStr = new Map();
+let saveSeq = 0, saveChain = Promise.resolve();
+function setSaveState(st, why) {
+  const el = $('#pg-save'); if (!el) return;
+  el.dataset.st = st;
+  el.textContent = { saving: 'Guardando…', saved: 'Guardado', error: 'Sin guardar' }[st];
+  el.title = st === 'error' ? 'No se pudo guardar en este navegador' + (why ? ` (${why})` : '') + '. Descarga las páginas con el botón de al lado para no perderlas.' : st === 'saved' ? 'Tus páginas abiertas están guardadas en este navegador y vuelven al recargar' : 'Guardando tus páginas en este navegador';
+}
+function pageIndex() { return { v: 2, active: pages.indexOf(pageCur), list: pages.map(p => ({ id: p.id, label: p.label || '', view: p.view || null, n: p.n || 0, target: p.target || 2, ver: p.ver ?? null })) }; }
+function savePages() {
+  if (!pageCur) return saveChain;
+  try { writePage(pageCur); } catch (e) { }
+  renderPages();
+  const seq = ++saveSeq, snap = pages.map(p => [p.id, p.str || '']), index = pageIndex();
+  setSaveState('saving');
+  saveChain = saveChain.then(async () => {
+    const puts = snap.filter(([id, str]) => savedStr.get(id) !== str).map(([id, str]) => ['page:' + id, str]), gone = [...savedStr.keys()].filter(id => !snap.some(([i]) => i === id));
+    puts.push(['pages', index]);
+    const ok = await DB.batch(puts, gone.map(id => 'page:' + id));
+    if (ok) { for (const [id, str] of snap) savedStr.set(id, str); for (const id of gone) savedStr.delete(id); }
+    if (ok) { try { localStorage.removeItem('bpr.pages'); localStorage.removeItem('bpr.draft'); localStorage.removeItem('bpr.rescue'); } catch (e) { } }
+    if (seq === saveSeq) setSaveState(ok ? 'saved' : 'error', ok ? '' : 'no queda sitio o el navegador no deja guardar');
+    if (!ok && !pageWarned) { pageWarned = true; toast('No se pudieron guardar las páginas en este navegador. Descárgalas con el botón de la barra de páginas para no perderlas.', 'warn', 7000); }
+  }).catch(e => { setSaveState('error', e && e.message); });
+  return saveChain;
+}
+// crea una página vacía detrás de la actual y la deja activa (sin dibujar nada aún)
+function addPage() {
+  stashPage();
+  const pg = { id: pageId(), label: '', str: '', n: 0 }, at = pageCur ? pages.indexOf(pageCur) + 1 : pages.length;
+  pages.splice(at, 0, pg); pageCur = pg; return pg;
+}
+function newPage() {
+  addPage(); openParsed({ ents: [], tiles: [], wires: [], meta: newMeta() });
+  S.target = 2; $('#bp-target').value = '2'; renderBpSrc(); savePages();
+  toast('Página nueva. Las demás siguen abiertas en las pestañas de arriba.');
+}
+async function switchTo(pg) { if (!pg || pg === pageCur) return; stashPage(); await showPage(pg); savePages(); }
+function stepPage(d) { const n = pages.length; if (n < 2) return; switchTo(pages[(pages.indexOf(pageCur) + d + n) % n]); }
+function pageTitle(pg) { return (pg === pageCur ? $('#bp-label').value.trim() : pg.label) || 'Sin nombre'; }
+async function closePage(pg) {
+  const cur = pg === pageCur, has = cur ? !isEmptyS() : !!pg.str;
+  if (has && !(await askConfirm(`¿Cerrar «${pageTitle(pg)}»?`, 'La página se borra de este navegador. Si quieres conservar el plano, guárdalo en Mis planos o descárgalo antes.', 'Cerrar página'))) return;
+  const i = pages.indexOf(pg); if (i < 0) return; pages.splice(i, 1);
+  if (cur) { pageCur = null; if (!pages.length) pages.push({ id: pageId(), label: '', str: '', n: 0 }); await showPage(pages[Math.min(i, pages.length - 1)]); }
+  savePages();
+}
+// abre cada plano de un libro en su propia página; una página vacía sin historial se sustituye
+async function openBookPages(list, active, quiet, preset) {
+  if (!list || !list.length) return;
+  const old = pageCur; if (old) stashPage();
+  const np = list.map(it => Object.assign({ id: pageId(), label: it.bp.label || it.label || '', str: BP.encodeSync({ blueprint: it.bp }), n: it.n || 0 }, preset ? { ver: null } : {}));   // las plantillas no vienen del juego
+  pages.splice(old ? pages.indexOf(old) + 1 : pages.length, 0, ...np);
+  if (old && !old.str && !(old.live && old.live.undo.length)) pages.splice(pages.indexOf(old), 1);
+  pageCur = null; await showPage(np[clamp(active | 0, 0, np.length - 1)]); savePages();
+  if (!quiet) toast(`${np.length} planos abiertos, cada uno en su página. Cambia entre ellas en la barra de arriba (o con Alt+← y Alt+→).`, 'ok', 5000);
+}
+function renderPages() {
+  const root = $('#ptabs'); if (!root || pageRenaming) return;
+  root.innerHTML = pages.map(pg => {
+    const on = pg === pageCur, n = on ? S.ents.size : pg.n || 0, t = pageTitle(pg);
+    return `<div class="ptab${on ? ' on' : ''}" role="tab" tabindex="${on ? 0 : -1}" aria-selected="${on}" data-id="${esc(pg.id)}" title="${esc(t)}: ${n} entidades. Doble clic para cambiar el nombre"><span class="pt">${esc(t)}</span><small>${n}</small><button class="px" data-x tabindex="-1" aria-label="Cerrar ${esc(t)}" title="Cerrar página">×</button></div>`;
+  }).join('');
+  const on = root.querySelector('.ptab.on');
+  if (on && pageCur && pageOnId !== pageCur.id) { pageOnId = pageCur.id; const L = on.offsetLeft, R = L + on.offsetWidth; if (L < root.scrollLeft) root.scrollLeft = L; else if (R > root.scrollLeft + root.clientWidth) root.scrollLeft = R - root.clientWidth; }
+}
+function renamePage(tab) {
+  if (!pageCur || tab.dataset.id !== pageCur.id) return;
+  const sp = tab.querySelector('.pt'), inp = document.createElement('input');
+  inp.value = $('#bp-label').value; inp.maxLength = 200; inp.placeholder = 'Nombre del plano'; inp.setAttribute('aria-label', 'Nombre de la página');
+  sp.replaceWith(inp); pageRenaming = true; inp.focus(); inp.select();
+  const done = ok => { if (!pageRenaming) return; pageRenaming = false; if (ok) { $('#bp-label').value = inp.value.trim(); S.meta.label = inp.value.trim(); saveDraft(); } renderPages(); };
+  inp.addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter') done(true); else if (e.key === 'Escape') done(false); });
+  inp.addEventListener('blur', () => done(true));
+  for (const ev of ['click', 'dblclick', 'pointerdown']) inp.addEventListener(ev, e => e.stopPropagation());
+}
+const tabPage = el => { const t = el.closest('.ptab'); return t ? pages.find(p => p.id === t.dataset.id) : null; };
+$('#ptabs').addEventListener('click', e => { const pg = tabPage(e.target); if (!pg) return; if (e.target.closest('[data-x]')) closePage(pg); else switchTo(pg); });
+$('#ptabs').addEventListener('auxclick', e => { if (e.button !== 1) return; const pg = tabPage(e.target); if (pg) { e.preventDefault(); closePage(pg); } });
+$('#ptabs').addEventListener('dblclick', e => { const t = e.target.closest('.ptab'); if (t && !e.target.closest('[data-x]')) renamePage(t); });
+$('#ptabs').addEventListener('keydown', e => {
+  const pg = tabPage(e.target); if (!pg || e.target.tagName === 'INPUT') return;
+  if (['Enter', ' ', 'F2', 'Delete', 'ArrowLeft', 'ArrowRight'].includes(e.key)) e.stopPropagation();
+  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); switchTo(pg); }
+  else if (e.key === 'F2') { e.preventDefault(); renamePage(e.target.closest('.ptab')); }
+  else if (e.key === 'Delete') { e.preventDefault(); closePage(pg); }
+  else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); stepPage(e.key === 'ArrowLeft' ? -1 : 1); setTimeout(() => { const t = $('#ptabs .ptab.on'); if (t) t.focus(); }, 0); }
+});
+// al cerrar o recargar, la página activa se copia también al instante en localStorage por si el guardado no llega a terminar
+function rescueNow() {
+  if (!pageCur) return;
+  try { writePage(pageCur); } catch (e) { return; }
+  if (savedStr.get(pageCur.id) !== (pageCur.str || '')) LS.set('bpr.rescue', { id: pageCur.id, str: pageCur.str || '', index: pageIndex() });
+  savePages();
+}
+window.addEventListener('pagehide', rescueNow);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') rescueNow(); });
+async function startPages() {
+  try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => { }); } catch (e) { }   // que el navegador no lo borre si se queda sin sitio
+  let idx = await DB.get('pages'), fromOld = false;
+  if (!(idx && Array.isArray(idx.list) && idx.list.length)) { const st = LS.get('bpr.pages', null); if (st && Array.isArray(st.list) && st.list.length) { idx = st; fromOld = true; } }   // versión anterior: todo en localStorage
+  const rescue = LS.get('bpr.rescue', null);
+  if (!(idx && idx.list && idx.list.length) && rescue && rescue.index) idx = rescue.index;
+  if (idx && Array.isArray(idx.list) && idx.list.length) {
+    pages = await Promise.all(idx.list.filter(p => p && p.id).map(async p => {
+      const stored = typeof p.str === 'string' ? null : await DB.get('page:' + p.id);
+      const str = typeof p.str === 'string' ? p.str : (typeof stored === 'string' ? stored : '');
+      if (!fromOld && typeof stored === 'string') savedStr.set(p.id, stored);
+      return { id: p.id, label: p.label || '', str, view: p.view || null, n: p.n || 0, target: p.target === 1 ? 1 : 2, ver: p.ver ?? null };
+    }));
+    if (rescue && rescue.id) { const pg = pages.find(p => p.id === rescue.id); if (pg && typeof rescue.str === 'string') pg.str = rescue.str; }
+    if (pages.length) { await showPage(pages[clamp(idx.active | 0, 0, pages.length - 1)]); updateEmpty(); savePages(); return; }
+  }
+  const d = LS.get('bpr.draft', null);
+  if (d) { pages = [{ id: pageId(), label: '', str: d, n: 0 }]; await showPage(pages[0]); savePages(); toast('Recuperado tu último plano'); return; }
+  // primera visita: el pack de megabase para Vulcano, cada plano en su página y con la megabase montada a la vista
+  const dd = presetData(PRESETS[0]), star = dd.list.findIndex(it => /completa/i.test(it.bp.label));
+  await openBookPages(dd.list, Math.max(0, star), true, true);
+  toast(`Abierto el pack «${PRESETS[0].label}»: ${dd.list.length} planos, uno por página. «Plantillas» lo vuelve a abrir y «Nuevo» empieza un plano vacío.`, 'ok', 7000);
+}
+
+// ----- descargas y archivos -----
+function slug(s) { return norm(String(s || '')).replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'plano'; }
+function downloadText(name, text, msg) {
+  try {
+    const url = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' })), a = document.createElement('a');
+    a.href = url; a.download = slug(name) + '.txt'; a.hidden = true; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000); toast(msg || `Descargado ${a.download}`, 'ok', 4500);
+  } catch (e) { toast('El navegador no dejó descargar el archivo: ' + e.message, 'err'); }
+}
+async function downloadPages() {
+  savePages();
+  const kids = [];
+  for (const pg of pages) { if (!pg.str) continue; try { const o = await BP.decode(pg.str); if (o.blueprint) kids.push({ blueprint: Object.assign({}, o.blueprint, { label: pg.label || o.blueprint.label || 'Plano sin nombre' }) }); } catch (e) { } }
+  if (!kids.length) return toast('Todas las páginas están vacías', 'warn');
+  downloadText('paginas-blueprinter', BP.encodeSync(BP.buildBook('Páginas de Blueprinter', kids, S.target)), `Descargadas ${kids.length} páginas en un libro de planos (para Factorio ${S.target === 1 ? '1.1' : '2.0'}). Ábrelo aquí con «Importar → Abrir archivo» y «Abrir todo en páginas».`);
+}
+async function openFile(file) {
+  if (!file) return;
+  if (file.size > 30e6) return toast(`«${file.name}» es demasiado grande para ser un plano`, 'err');
+  let text; try { text = await file.text(); } catch (e) { return toast(`No se pudo leer «${file.name}»`, 'err'); }
+  try { const o = await BP.decode(text); importObject(o, 'open', text.trim()); }
+  catch (e) { toast(`«${file.name}»: ${e.message}`, 'err'); }
+}
+$('#file-in').addEventListener('change', e => { const f = e.target.files && e.target.files[0]; e.target.value = ''; if (!$('#m-import').hidden) closeModal($('#m-import')); openFile(f); });
+let dragN = 0;
+const dragFiles = e => !!(e.dataTransfer && [...(e.dataTransfer.types || [])].includes('Files'));
+window.addEventListener('dragenter', e => { if (!dragFiles(e)) return; e.preventDefault(); dragN++; $('#drop').hidden = false; });
+window.addEventListener('dragover', e => { if (!dragFiles(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; });
+window.addEventListener('dragleave', e => { if (!dragFiles(e)) return; if (--dragN <= 0) { dragN = 0; $('#drop').hidden = true; } });
+window.addEventListener('drop', e => {
+  if (!dragFiles(e)) return; e.preventDefault(); dragN = 0; $('#drop').hidden = true;
+  const m = document.querySelector('.modal:not([hidden])'); if (m) closeModal(m);
+  openFile(e.dataTransfer.files[0]);
+});
+
+// ----- plantillas de serie (src/core/presets.js) -----
+const TPL = new Map();
+function presetData(pr) {
+  let d = TPL.get(pr.id);
+  if (!d) { const obj = pr.book(); d = { obj, list: BP.flattenBook(obj.blueprint_book) }; d.list.forEach(it => { it.str = BP.encodeSync({ blueprint: it.bp }); }); TPL.set(pr.id, d); }
+  return d;
+}
+function openTemplates() {
+  $('#tm-body').innerHTML = PRESETS.map(pr => {
+    const d = presetData(pr), b = d.obj.blueprint_book;
+    return `<section class="tcard" data-p="${esc(pr.id)}"><h3>${esc(pr.label)}<small>${esc(pr.sub)}</small></h3><p>${esc(b.description || '')}</p>
+      <div class="row"><button class="btn primary small" data-a="pages">Abrir todo en páginas</button><button class="btn small" data-a="lib" title="Guardar todos los planos en una carpeta de Mis planos">Guardar en Mis planos</button><button class="btn small" data-a="copy" title="Copiar el libro entero para importarlo en Factorio">Copiar libro</button><button class="btn small" data-a="down">Descargar .txt</button></div>
+      <ul class="tlist">${d.list.map((it, i) => `<li data-i="${i}" title="${esc(it.bp.description || '')}"><canvas width="112" height="112" aria-hidden="true"></canvas><b>${esc(it.bp.label || 'Plano')}<small>${it.n} entidades</small></b><div class="row"><button class="btn small primary" data-a="open" title="Abrir en una página nueva para verlo y editarlo">Abrir</button><button class="btn small" data-a="hold" title="Llevarlo en el cursor para colocarlo en el plano actual">Al cursor</button></div></li>`).join('')}</ul></section>`;
+  }).join('');
+  $('#tm-body').querySelectorAll('.tcard').forEach(sec => { const d = TPL.get(sec.dataset.p); sec.querySelectorAll('li[data-i]').forEach(li => { const it = d.list[+li.dataset.i]; drawThumb(li.querySelector('canvas'), { id: `tpl:${sec.dataset.p}:${li.dataset.i}`, str: it.str }); }); });
+  openModal('m-tmpl', 'button.primary');
+}
+$('#tm-body').addEventListener('click', async e => {
+  const b = e.target.closest('button[data-a]'); if (!b) return;
+  const sec = b.closest('.tcard'), pr = PRESETS.find(p => p.id === sec.dataset.p), d = presetData(pr), a = b.dataset.a, li = b.closest('li[data-i]');
+  if (li) { const it = d.list[+li.dataset.i]; closeModal($('#m-tmpl')); loadBp(deep(it.bp), a === 'hold' ? 'hold' : 'open'); if (a !== 'hold') { S.meta.version = null; renderBpSrc(); } return; }
+  if (a === 'pages') { closeModal($('#m-tmpl')); return openBookPages(d.list, 0, false, true); }
+  if (a === 'lib') { closeModal($('#m-tmpl')); return openSave('book', { list: d.list, label: pr.label }); }
+  const str = BP.encodeSync(d.obj);
+  if (a === 'down') return downloadText(pr.label, str, `Libro «${pr.label}» descargado. En Factorio: «Importar cadena» y pega el contenido del archivo.`);
+  const ok = await writeClip(str); toast(ok ? `Libro «${pr.label}» copiado (${d.list.length} planos). En Factorio: «Importar cadena» y Ctrl+V.` : 'El navegador bloqueó el portapapeles; prueba con «Descargar .txt»', ok ? 'ok' : 'warn', 4500);
+});
+
+// ----- planificador de producción (src/core/planner.js): qué hace falta para fabricar algo a un ritmo dado -----
+const PLS = Object.assign({ targets: [['electronic-circuit', 10, 's']], opt: { spaceAge: true, modules: 'none', beacons: 0, drill: 'electric-mining-drill', belt: 60, recipes: {}, machines: {}, raw: [] }, tab: 'graph' }, LS.get('bpr.plan', {}));
+const PLAN_QUICK = [
+  ['Circuitos verdes', [['electronic-circuit', 10, 's']]], ['Circuitos rojos', [['advanced-circuit', 5, 's']]], ['Circuitos azules', [['processing-unit', 2, 's']]],
+  ['Ciencias de Nauvis', ['automation-science-pack', 'logistic-science-pack', 'military-science-pack', 'chemical-science-pack', 'production-science-pack', 'utility-science-pack'].map(n => [n, 1, 's'])],
+  ['Cohete por minuto', [['rocket-part', 50, 'min']]], ['Ciencia metalúrgica', [['metallurgic-science-pack', 1, 's']]], ['Cinta turbo', [['turbo-transport-belt', 1, 's']]],
+];
+const fmtN = v => (v >= 100 ? Math.round(v) : v >= 10 ? Math.round(v * 10) / 10 : Math.round(v * 100) / 100).toLocaleString('es');
+const ICONS = new Map();
+function iconURL(name) {
+  if (!DEFS[name] || !DEFS[name].cat) return null;
+  let u = ICONS.get(name); if (u) return u;
+  const c = document.createElement('canvas'); c.width = c.height = 72; drawIcon(c, name); u = c.toDataURL(); ICONS.set(name, u); return u;
+}
+const PCOL = ['#e3ad1a', '#dd4636', '#3a9be2', '#79c142', '#c9743a', '#8a6db3', '#4b8f69', '#c99f36', '#5f8fb8', '#b85f8f'];
+const itemColor = it => isFluid(it) ? '#3d9bff' : PCOL[[...it].reduce((a, ch) => (a * 31 + ch.charCodeAt(0)) >>> 0, 7) % PCOL.length];
+const savePlan = () => LS.set('bpr.plan', PLS);
+let planItems = null;   // etiqueta → objeto
+function planFillItems() {
+  const list = products(PLS.opt.spaceAge); planItems = new Map(list.map(n => [norm(itemName(n)), n]));
+  $('#dl-items').innerHTML = list.map(n => `<option value="${esc(itemName(n))}"></option>`).join('');
+}
+function planTargetsHtml() {
+  $('#pl-targets').innerHTML = PLS.targets.map(([it, rate, u], i) => `<div class="pl-t" data-i="${i}">
+    <input list="dl-items" value="${esc(it ? itemName(it) : '')}" placeholder="Producto, p. ej. circuito" aria-label="Producto" spellcheck="false" autocomplete="off" data-k="item">
+    <input type="number" min="0" step="any" value="${rate}" aria-label="Cantidad" data-k="rate">
+    <select aria-label="Unidad" data-k="unit"><option value="s"${u === 's' ? ' selected' : ''}>/s</option><option value="min"${u === 'min' ? ' selected' : ''}>/min</option></select>
+    <button class="xbtn" data-k="del" aria-label="Quitar" title="Quitar">×</button>
+    <span class="lbl">${it ? esc(it) : 'Escribe y elige de la lista'}</span></div>`).join('');
+}
+$('#pl-targets').addEventListener('change', e => {
+  const row = e.target.closest('.pl-t'); if (!row) return; const t = PLS.targets[+row.dataset.i], k = e.target.dataset.k;
+  if (k === 'item') { const v = e.target.value.trim(), it = planItems.get(norm(v)) || (RECIPE_ANY(v) ? v : null); if (it) t[0] = it; else { toast(`No encuentro «${v}». Elige un producto de la lista.`, 'warn'); } }
+  else if (k === 'rate') t[1] = Math.max(0, +e.target.value || 0);
+  else if (k === 'unit') t[2] = e.target.value;
+  planUpdate(true);
+});
+$('#pl-targets').addEventListener('click', e => { const b = e.target.closest('[data-k="del"]'); if (!b) return; PLS.targets.splice(+b.closest('.pl-t').dataset.i, 1); planUpdate(true); });
+const RECIPE_ANY = v => products(true).includes(v);
+$('#pl-add').onclick = () => { PLS.targets.push(['', 1, 's']); planTargetsHtml(); const ins = $('#pl-targets').querySelectorAll('input[data-k="item"]'); ins[ins.length - 1].focus(); };
+$('#pl-quick').innerHTML = PLAN_QUICK.map(([l], i) => `<button type="button" data-q="${i}">${esc(l)}</button>`).join('');
+$('#pl-quick').addEventListener('click', e => { const b = e.target.closest('[data-q]'); if (!b) return; PLS.targets = PLAN_QUICK[+b.dataset.q][1].map(t => t.slice()); if (PLS.targets.some(([n]) => recipe(n) && recipe(n).sa)) PLS.opt.spaceAge = true; planUpdate(true); });
+$('#pl-mod').innerHTML = Object.entries(MODULES).map(([k, m]) => `<option value="${k}">${esc(m.label)}</option>`).join('');
+$('#pl-drill').innerHTML = Object.keys(DRILLS).filter(d => d !== 'pumpjack').map(d => `<option value="${d}">${esc(def(d).label)}</option>`).join('');
+$('#pl-belt').innerHTML = Object.entries(BELTS).map(([v, l]) => `<option value="${v}">${esc(l)} (${v}/s)</option>`).join('');
+for (const [id, k, f] of [['#pl-sa', 'spaceAge', el => el.checked], ['#pl-mod', 'modules', el => el.value], ['#pl-bea', 'beacons', el => clamp(Math.round(+el.value) || 0, 0, 16)], ['#pl-drill', 'drill', el => el.value], ['#pl-belt', 'belt', el => +el.value]])
+  $(id).addEventListener('change', e => { PLS.opt[k] = f(e.target); if (k === 'spaceAge') planFillItems(); planUpdate(false); });
+document.querySelectorAll('#m-plan [data-pt]').forEach(b => b.onclick = () => { PLS.tab = b.dataset.pt; planUpdate(false); });
+
+let PLR = null;
+function planUpdate(targets) {
+  const o = PLS.opt;
+  $('#pl-sa').checked = !!o.spaceAge; $('#pl-mod').value = o.modules; $('#pl-bea').value = o.beacons; $('#pl-drill').value = o.drill; $('#pl-belt').value = String(o.belt);
+  if (targets !== false) planTargetsHtml();
+  document.querySelectorAll('#m-plan [data-pt]').forEach(b => b.classList.toggle('on', b.dataset.pt === PLS.tab));
+  for (const v of ['graph', 'table', 'raw']) $('#pl-' + v).hidden = PLS.tab !== v;
+  const T = PLS.targets.filter(([it, r]) => it && r > 0).map(([it, r, u]) => [it, u === 'min' ? r / 60 : r]);
+  PLR = plan(T, o); savePlan();
+  const nm = PLR.rows.reduce((a, r) => a + Math.ceil(r.machines - 1e-9), 0);
+  $('#pl-sum').textContent = T.length ? `${nm.toLocaleString('es')} máquinas · ${fmtN(PLR.power)} MW · ${PLR.raw.length} materias primas` : '';
+  if (PLS.tab === 'graph') planGraph(PLR); else if (PLS.tab === 'table') planTable(PLR); else planRaw(PLR);
+}
+function planTable(R) {
+  if (!R.rows.length) { $('#pl-table').innerHTML = '<p class="pl-empty">Elige a la izquierda qué quieres fabricar.</p>'; return; }
+  const sa = PLS.opt.spaceAge, raws = new Set(PLS.opt.raw);
+  $('#pl-table').innerHTML = `<table><thead><tr><th>Producto y receta</th><th>Máquina</th><th class="n">Máquinas</th><th>Produce</th><th>Consume</th><th class="n">MW</th><th>Se trae</th></tr></thead><tbody>${R.rows.map(r => {
+    const alts = producers(r.item).filter(n => sa || !recipe(n).sa), ms = machinesFor(r.recipe, sa), ic = iconURL(r.machine);
+    return `<tr data-r="${esc(r.recipe)}" data-it="${esc(r.item)}"><td><span class="big">${esc(itemName(r.item))}</span>${alts.length > 1 ? `<select data-k="recipe" aria-label="Receta">${alts.map(n => `<option value="${esc(n)}"${n === r.recipe ? ' selected' : ''}>${esc(recipeLabel(n))}</option>`).join('')}</select>` : `<span class="sub">${esc(recipeLabel(r.recipe))}</span>`}</td>
+      <td>${ic ? `<img class="ic" src="${ic}" alt="">` : ''}${ms.length > 1 ? `<select data-k="machine" aria-label="Máquina">${ms.map(m => `<option value="${m}"${m === r.machine ? ' selected' : ''}>${esc(def(m).label)}</option>`).join('')}</select>` : esc(def(r.machine).label)}</td>
+      <td class="n"><span class="big">${Math.ceil(r.machines - 1e-9)}</span><span class="sub">${fmtN(r.machines)}</span></td>
+      <td>${r.outputs.map(([it, v]) => `${esc(itemName(it))} <b>${fmtN(v)}/s</b>`).join('<br>')}</td>
+      <td>${r.inputs.map(([it, v]) => `${esc(itemName(it))} ${fmtN(v)}/s`).join('<br>')}</td>
+      <td class="n">${fmtN(r.power)}</td>
+      <td><label class="chk"><input type="checkbox" data-k="raw"${raws.has(r.item) ? ' checked' : ''}> traer</label></td></tr>`;
+  }).join('')}</tbody></table>`;
+}
+$('#pl-table').addEventListener('change', e => {
+  const tr = e.target.closest('tr[data-r]'); if (!tr) return; const k = e.target.dataset.k, o = PLS.opt;
+  if (k === 'recipe') o.recipes[tr.dataset.it] = e.target.value;
+  else if (k === 'machine') o.machines[tr.dataset.r] = e.target.value;
+  else if (k === 'raw') { o.raw = o.raw.filter(x => x !== tr.dataset.it); if (e.target.checked) o.raw.push(tr.dataset.it); }
+  planUpdate(false);
+});
+function planRaw(R) {
+  const belt = PLS.opt.belt, nm = R.rows.reduce((a, r) => a + Math.ceil(r.machines - 1e-9), 0);
+  const ext = w => w.extractors ? `${Math.ceil(w.extractors.count - 1e-9)} × ${esc(def(w.extractors.name).label)}` : isFluid(w.item) ? 'bombeo' : '';
+  $('#pl-raw').innerHTML = `<div class="pl-cards"><div><b>${nm.toLocaleString('es')}</b><small>máquinas</small></div><div><b>${fmtN(R.power)} MW</b><small>electricidad (sin balizas ni perforadoras)</small></div><div><b>${R.raw.length}</b><small>materias primas</small></div><div><b>${R.rows.length}</b><small>recetas en la cadena</small></div></div>
+    <table><thead><tr><th>Materia prima o lo que se trae</th><th class="n">por segundo</th><th class="n">por minuto</th><th class="n">Transporte</th><th>Extracción</th></tr></thead><tbody>
+    ${R.raw.map(w => `<tr><td class="big">${esc(itemName(w.item))}</td><td class="n">${fmtN(w.rate)}</td><td class="n">${fmtN(w.rate * 60)}</td><td class="n">${isFluid(w.item) ? `${fmtN(w.rate / 1200)} tuberías llenas` : `${fmtN(w.rate / belt)} cintas`}</td><td>${ext(w)}</td></tr>`).join('') || '<tr><td colspan="5" class="pl-empty">Nada</td></tr>'}</tbody></table>
+    ${R.surplus.length ? `<table><thead><tr><th>Sobra (subproductos)</th><th class="n">por segundo</th><th class="n">por minuto</th><th></th><th></th></tr></thead><tbody>${R.surplus.map(s => `<tr><td>${esc(itemName(s.item))}</td><td class="n">${fmtN(s.rate)}</td><td class="n">${fmtN(s.rate * 60)}</td><td></td><td></td></tr>`).join('')}</tbody></table>` : ''}
+    ${R.cycles.length ? `<p class="hint" style="padding:0 10px">Hay recetas en ciclo (${R.cycles.map(itemName).join(', ')}): ahí se cuenta lo que entra como si se trajera.</p>` : ''}`;
+}
+// esquema: columnas de izquierda (materias primas) a derecha (lo pedido); cada caja es un paso con su máquina
+function planGraph(R) {
+  const box = $('#pl-graph');
+  if (!R.rows.length && !R.raw.length) { box.innerHTML = '<p class="pl-empty">Elige a la izquierda qué quieres fabricar y aquí verás la cadena completa con sus máquinas.</p>'; return; }
+  const nodes = [], byItem = new Map(), nodeOf = new Map();
+  for (const r of R.rows) { const n = { kind: 'row', r, h: 74 }; nodes.push(n); nodeOf.set(r.recipe, n); }
+  for (const r of R.rows) for (const [it] of r.outputs) if (!byItem.has(it) || r.item === it) byItem.set(it, nodeOf.get(r.recipe));
+  for (const w of R.raw) { const n = { kind: 'raw', w, h: 54 }; nodes.push(n); if (!R.rows.some(r => r.item === w.item)) byItem.set(w.item, n); }
+  const edges = [];
+  for (const r of R.rows) for (const [it, v] of r.inputs) { const src = byItem.get(it); if (src && v > 1e-9 && src !== nodeOf.get(r.recipe)) edges.push({ a: src, b: nodeOf.get(r.recipe), it, v }); }
+  for (const [it, v] of R.targets) { const g = { kind: 'goal', it, v, h: 54 }; nodes.push(g); const src = byItem.get(it); if (src) edges.push({ a: src, b: g, it, v }); }
+  // capas: distancia hasta lo pedido (las materias primas van a la izquierda del todo)
+  const d = new Map(nodes.map(n => [n, n.kind === 'goal' ? 0 : -1]));
+  for (let k = 0; k < nodes.length; k++) { let ch = false; for (const e of edges) { const v = d.get(e.b) + 1; if (d.get(e.b) >= 0 && v > d.get(e.a) && v <= nodes.length) { d.set(e.a, v); ch = true; } } if (!ch) break; }
+  let maxD = 0; for (const [n, v] of d) if (n.kind !== 'raw') maxD = Math.max(maxD, v);
+  for (const n of nodes) if (n.kind === 'raw' || d.get(n) < 0) d.set(n, maxD + 1);
+  maxD += 1;
+  const cols = Array.from({ length: maxD + 1 }, () => []); for (const n of nodes) cols[maxD - d.get(n)].push(n);
+  const CW = 270, NW = 214, GAP = 16, PAD = 20;
+  const place = () => cols.forEach(c => { let y = PAD; for (const n of c) { n.y = y; y += n.h + GAP; } });
+  place();
+  for (let pass = 0; pass < 4; pass++) {   // ordenar cada columna por la altura media de lo que conecta
+    for (const c of cols) { for (const n of c) { const ys = edges.filter(e => e.a === n || e.b === n).map(e => (e.a === n ? e.b : e.a)).map(m => m.y + m.h / 2); n.k = ys.length ? ys.reduce((a, b) => a + b) / ys.length : n.y; } c.sort((a, b) => a.k - b.k); }
+    place();
+  }
+  cols.forEach((c, i) => c.forEach(n => { n.x = PAD + i * CW; }));
+  const H = Math.max(...cols.map(c => c.reduce((a, n) => a + n.h + GAP, PAD))) + PAD, W = PAD * 2 + maxD * CW + NW;
+  const ns = 'http://www.w3.org/2000/svg', svg = document.createElementNS(ns, 'svg');
+  svg.setAttribute('width', W); svg.setAttribute('height', H); svg.setAttribute('viewBox', `0 0 ${W} ${H}`); svg.setAttribute('role', 'img'); svg.setAttribute('aria-label', 'Esquema de la cadena de producción');
+  const mk = (tag, a, parent, txt) => { const e = document.createElementNS(ns, tag); for (const k in a) e.setAttribute(k, a[k]); if (txt != null) e.textContent = txt; (parent || svg).appendChild(e); return e; };
+  const gE = mk('g', {}), gL = mk('g', {}), gN = mk('g', {});
+  // reparto de los puntos de entrada y salida en cada caja para que las líneas no se monten
+  const ports = (n, side) => { const es = edges.filter(e => (side === 'out' ? e.a : e.b) === n).sort((p, q) => (side === 'out' ? p.b.y - q.b.y : p.a.y - q.a.y)); es.forEach((e, i) => { e[side] = n.y + n.h * (i + 1) / (es.length + 1); }); };
+  for (const n of nodes) { ports(n, 'out'); ports(n, 'in'); }
+  for (const e of edges) {
+    const x0 = e.a.x + NW, x1 = e.b.x, y0 = e.out, y1 = e.in, k = Math.max(40, (x1 - x0) * 0.5), col = itemColor(e.it);
+    const path = mk('path', { d: `M${x0} ${y0} C${x0 + k} ${y0} ${x1 - k} ${y1} ${x1} ${y1}`, fill: 'none', stroke: col, 'stroke-width': 2.2, 'stroke-opacity': .85 }, gE);
+    mk('title', {}, path, `${itemName(e.it)}: ${fmtN(e.v)}/s`);
+    // la etiqueta solo cuando no es lo que ya pone la caja de origen (subproductos)
+    if (x1 - x0 > 40 && e.a.kind === 'row' && e.a.r.item !== e.it) {
+      const tx = x0 + 10, ty = y0 - 4, t = mk('text', { x: tx, y: ty, 'font-size': 11.5, fill: col, 'font-family': UIF }, gL, `${itemName(e.it)} ${fmtN(e.v)}/s`);
+      const w = t.getComputedTextLength ? t.getComputedTextLength() : 80; if (w > CW - NW - 14) t.textContent = `${fmtN(e.v)}/s`;
+    }
+  }
+  const T = (x, y, s, txt, wt, col, parent) => mk('text', { x, y, 'font-size': s, 'font-weight': wt || 400, fill: col || 'var(--text)', 'font-family': UIF }, parent, txt);
+  for (const n of nodes) {
+    const g = mk('g', {}, gN);
+    if (n.kind === 'row') {
+      const r = n.r, ic = iconURL(r.machine), col = itemColor(r.item);
+      mk('rect', { x: n.x, y: n.y, width: NW, height: n.h, rx: 6, fill: 'var(--panel)', stroke: col, 'stroke-width': 1.5 }, g);
+      if (ic) mk('image', { href: ic, x: n.x + 8, y: n.y + 10, width: 40, height: 40 }, g);
+      const t = T(n.x + 56, n.y + 22, 14, itemName(r.item), 700, null, g); if (t.getComputedTextLength && t.getComputedTextLength() > NW - 62) { let s = itemName(r.item); while (s.length > 4 && (t.textContent = s + '…', t.getComputedTextLength() > NW - 62)) s = s.slice(0, -1); }
+      T(n.x + 56, n.y + 40, 12.5, `${fmtN(r.machines)} × ${def(r.machine).label}`, 400, 'var(--muted)', g);
+      T(n.x + 56, n.y + 58, 13, `${fmtN(r.outputs.find(o => o[0] === r.item)[1])}/s`, 600, col, g);
+      T(n.x + NW - 10, n.y + 58, 12, `${Math.ceil(r.machines - 1e-9)} uds.`, 600, 'var(--muted)', g).setAttribute('text-anchor', 'end');
+    } else if (n.kind === 'raw') {
+      const w = n.w; mk('rect', { x: n.x, y: n.y, width: NW, height: n.h, rx: 6, fill: 'var(--inset)', stroke: 'var(--line-2)', 'stroke-dasharray': '5 3' }, g);
+      T(n.x + 12, n.y + 21, 13.5, itemName(w.item), 700, null, g);
+      T(n.x + 12, n.y + 40, 12.5, `${fmtN(w.rate)}/s${w.extractors ? ` · ${Math.ceil(w.extractors.count - 1e-9)} × ${def(w.extractors.name).label}` : ''}`, 400, 'var(--muted)', g);
+    } else {
+      mk('rect', { x: n.x, y: n.y, width: NW, height: n.h, rx: 6, fill: 'var(--accent-soft)', stroke: 'var(--accent)', 'stroke-width': 1.5 }, g);
+      T(n.x + 12, n.y + 21, 12, 'OBJETIVO', 700, 'var(--accent)', g);
+      T(n.x + 12, n.y + 40, 13.5, `${itemName(n.it)} · ${fmtN(n.v)}/s`, 700, null, g);
+    }
+  }
+  box.innerHTML = ''; box.appendChild(svg);
+}
+function openPlanner() { if (!planItems) planFillItems(); openModal('m-plan', '#pl-targets input'); planUpdate(true); }
+$('#b-plan').onclick = openPlanner;
 
 // ----- ejemplo -----
 function loadExample() {
@@ -1688,15 +2123,18 @@ document.querySelectorAll('.tool[data-act]').forEach(b => b.addEventListener('cl
   else if (a === 'undo') undo(); else if (a === 'redo') redo(); else if (a === 'fit') fitView(); else if (a === 'center') centerView(); else toggleFlag(a);
   cv.focus({ preventScroll: true });
 }));
-$('#b-new').onclick = async () => { if ((S.ents.size || S.tiles.size) && !(await askConfirm('¿Empezar un plano vacío?', 'Lo que hay ahora en el lienzo se perderá si no lo has copiado o guardado.', 'Empezar de cero'))) return; openParsed({ ents: [], tiles: [], wires: [], meta: newMeta() }); S.target = 2; $('#bp-target').value = '2'; renderBpSrc(); };
+$('#b-new').onclick = $('#pg-add').onclick = () => newPage();
 $('#b-import').onclick = $('#e-import').onclick = () => { openModal('m-import'); $('#imp-text').select(); checkImport(); };
 $('#b-copy').onclick = $('#s-copy').onclick = copyAll;
 $('#s-export').onclick = openExport;
 $('#b-help').onclick = () => openModal('m-help');
 $('#e-example').onclick = loadExample;
+$('#b-tmpl').onclick = $('#e-tmpl').onclick = openTemplates;
+$('#s-down').onclick = $('#ex-down').onclick = () => { if (isEmptyS()) return toast('El plano está vacío', 'warn'); downloadText($('#bp-label').value.trim() || 'Plano', BP.encodeSync(fullBp()), 'Plano descargado como .txt. Para abrirlo, suéltalo sobre la ventana o usa «Importar → Abrir archivo».'); };
+$('#pg-down').onclick = downloadPages;
 $('#b-side').onclick = () => $('#side').classList.toggle('open');
 $('#bp-target').onchange = e => { S.target = +e.target.value; renderBpSrc(); saveDraft(); };
-$('#bp-label').oninput = $('#bp-desc').oninput = () => { clearTimeout(saveT); saveT = setTimeout(saveDraft, 900); };
+$('#bp-label').oninput = $('#bp-desc').oninput = () => { clearTimeout(saveT); saveT = setTimeout(saveDraft, 900); renderPages(); };
 document.addEventListener('pointerdown', e => { const sd = $('#side'); if (sd.classList.contains('open') && !sd.contains(e.target) && e.target !== $('#b-side')) sd.classList.remove('open'); });
 
 // ----- arranque -----
@@ -1709,8 +2147,4 @@ resize(); V.s = 32; V.ox = -CW / 2 / V.s; V.oy = -CH / 2 / V.s;
 buildPalette(); renderLib(); renderSel(); renderContents(); renderBpSrc(); setMode('select'); updateStatus();
 if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { dirty = true; });
 requestAnimationFrame(frame);
-(async () => {
-  const d = LS.get('bpr.draft', null);
-  if (d) { try { const o = await BP.decode(d); if (o.blueprint) { openParsed(BP.parseBlueprint(o.blueprint)); toast('Recuperado tu último plano'); } } catch (e) { } }
-  updateEmpty();
-})();
+startPages();
