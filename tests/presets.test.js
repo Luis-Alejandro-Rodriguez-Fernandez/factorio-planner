@@ -84,7 +84,7 @@ describe('pack «Megabase Vulcano»', () => {
     for (const pl of plans) for (const e of pl.p.ents) {
       const r = e.extra && e.extra.recipe; if (r) expect(BP.canCraft(e.name, r), `${pl.label}: ${e.name} → ${r}`).toBe(true);
       if (def(e.name).recipe && e.name !== 'rocket-silo') expect(r, `${pl.label}: ${e.name} sin receta`).toBeTruthy();
-      for (const it of (e.extra && e.extra.items) || []) expect(e.name === 'locomotive' ? ['coal'] : ['productivity-module-3', 'speed-module-3']).toContain(it.id.name);
+      for (const it of (e.extra && e.extra.items) || []) expect(e.name === 'locomotive' ? ['coal'] : ['productivity-module-2', 'speed-module-2']).toContain(it.id.name);
     }
   });
 

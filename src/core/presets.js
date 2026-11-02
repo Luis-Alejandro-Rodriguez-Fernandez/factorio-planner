@@ -50,12 +50,14 @@ function modules(machine, mod, n) {
   n = n == null ? SLOTS[machine] : n; const inv = MOD_INV[machine] || (machine === 'beacon' ? 1 : 4);
   return [{ id: { name: mod }, items: { in_inventory: Array.from({ length: n }, (_, i) => ({ inventory: inv, stack: i })) } }];
 }
-// velocidad efectiva y multiplicador de productividad. beacons: número de balizas que la alcanzan (2 velocidad 3 cada una)
+// módulos del pack: nivel 2 (no piden huevos de mordedor ni carburo; se fabrican en cualquier planeta)
+export const MOD = { prod: { item: 'productivity-module-2', speed: -0.1, prod: 0.06, energy: 0.6 }, speed: { item: 'speed-module-2', speed: 0.3, prod: 0, energy: 0.6 } };
+// velocidad efectiva y multiplicador de productividad. beacons: número de balizas que la alcanzan (2 de velocidad 2 cada una)
 export function rate(machine, mods, beacons) {
   const n = SLOTS[machine] || 0, p = mods === 'prod' ? n : 0, s = mods === 'speed' ? n : 0, b = beacons || 0;
-  const bea = b ? b * (1 / Math.sqrt(b)) * 1.5 * 2 * 0.5 : 0;                       // perfil 1/√n, eficacia 1,5
-  const speed = SPEED[machine] * Math.max(0.2, 1 - 0.15 * p + 0.5 * s + bea);
-  return { speed, prod: 1 + (BASE_PROD[machine] || 0) + 0.1 * p };
+  const bea = b ? b * (1 / Math.sqrt(b)) * 1.5 * 2 * MOD.speed.speed : 0;          // perfil 1/√n, eficacia 1,5
+  const speed = SPEED[machine] * Math.max(0.2, 1 + MOD.prod.speed * p + MOD.speed.speed * s + bea);
+  return { speed, prod: 1 + (BASE_PROD[machine] || 0) + MOD.prod.prod * p };
 }
 
 // ----- constructor de planos -----
@@ -82,10 +84,10 @@ class Plan {
   }
   machine(name, tx, ty, d, recipe, mods) {
     const extra = {}; if (recipe) extra.recipe = recipe;
-    if (mods) extra.items = modules(name, mods === 'prod' ? 'productivity-module-3' : 'speed-module-3');
+    if (mods) extra.items = modules(name, MOD[mods === 'prod' ? 'prod' : 'speed'].item);
     return this.put(name, tx, ty, d, extra);
   }
-  beacon(tx, ty) { return this.put('beacon', tx, ty, 0, { items: modules('beacon', 'speed-module-3') }); }
+  beacon(tx, ty) { return this.put('beacon', tx, ty, 0, { items: modules('beacon', MOD.speed.item) }); }
 }
 
 // ----- esqueleto común -----
@@ -168,7 +170,7 @@ function foundryBlock(o) {
   const nT = o.nA[0] + o.nA[1], supply = Math.min(1, nT * moltenOut / (12 * need)), useA = Math.min(1, 12 * need / (nT * moltenOut));
   const crafts = 12 / castT * supply, out = crafts * o.out * RB.prod, craftsA = nT * RA.speed / 16 * useA;
   const desc = [o.what,
-    `Produce unos ${f1(out)} ${o.unit}/s (${f1(out * 60)}/min) con 12 coladas de ${o.castLabel} (4 módulos de productividad 3 y 4 balizas con velocidad 3 cada una) y ${nT} fundiciones de lava con 4 módulos de velocidad 3.`,
+    `Produce unos ${f1(out)} ${o.unit}/s (${f1(out * 60)}/min) con 12 coladas de ${o.castLabel} (4 módulos de productividad 2 y 4 balizas con velocidad 2 cada una) y ${nT} fundiciones de lava con 4 módulos de velocidad 2.`,
     `Consume ${f1(craftsA * 500)} de lava/s de la troncal de la fila 24 (una bomba costera da 1200/s) y ${f1(craftsA)} de calcita/s; saca ${f1(craftsA * o.stone * RA.prod)} de piedra/s, que puedes convertir en ladrillos o relleno.`,
     o.items ? `Pide por robots ${o.items.map((it, i) => `${f1(crafts * o.per[i])} de ${o.names[i]}/s`).join(' y ')}.` : 'Las placas salen a cofres de suministro pasivo para los robots.',
   ].join('\n');
@@ -191,7 +193,7 @@ function miningBlock() {
   busPass(p, BUS.lava); busPass(p, BUS.acid);
   const r = rate('big-mining-drill', 'speed'), per = r.speed / 5;
   return Object.assign(bp('Minería: tungsteno, calcita o carbón',
-    `${rows.length} perforadoras grandes con 4 módulos de velocidad 3 que dejan el mineral en cofres de suministro pasivo. ` +
+    `${rows.length} perforadoras grandes con 4 módulos de velocidad 2 que dejan el mineral en cofres de suministro pasivo. ` +
     `Colócalo sobre un yacimiento de tungsteno (unos ${f1(rows.length * per)} de mineral/s), de calcita o de carbón (más rápido: tardan menos en extraerse). ` +
     'La investigación de productividad de minería suma encima. Las perforadoras grandes solo se fabrican en Vulcano y aquí no necesitan fluido.', p), { stats: { ore: rows.length * per } });
 }
@@ -221,7 +223,7 @@ function carbideBlock() {
   const rc = rate('chemical-plant', 'prod'), ra = rate('assembling-machine-3', 'prod');
   const carbon = 32 * rc.speed * rc.prod, carbide = Math.min(32 * ra.speed * ra.prod, carbon / 1 * ra.prod);
   return Object.assign(bp('Carbono y carburo de tungsteno',
-    `32 plantas químicas hacen carbono (carbón + ácido) y 32 ensambladoras 3 lo convierten en carburo de tungsteno (mineral de tungsteno + carbono + ácido), todas con módulos de productividad 3. ` +
+    `32 plantas químicas hacen carbono (carbón + ácido) y 32 ensambladoras 3 lo convierten en carburo de tungsteno (mineral de tungsteno + carbono + ácido), todas con módulos de productividad 2. ` +
     `Salen unos ${f1(carbide)} de carburo/s y sobran ${f1(Math.max(0, carbon - 32 * ra.speed))} de carbono/s para otros usos. ` +
     `Pide por robots ${f1(32 * rc.speed * 2)} de carbón/s y ${f1(32 * ra.speed * 2)} de mineral de tungsteno/s, y toma ${f1(32 * rc.speed * 20 + 32 * ra.speed * 10)} de ácido/s de la troncal de la fila 41.`, p), { stats: { acid: 32 * rc.speed * 20 + 32 * ra.speed * 10, ore: 32 * ra.speed * 2, coal: 32 * rc.speed * 2 } });
 }
@@ -256,7 +258,7 @@ function exportBlock() {
   busPass(p, BUS.lava); busPass(p, BUS.acid);
   const r = rate('rocket-silo', 'speed'), t = 50 * 3 / r.speed;
   return bp('Puerto de exportación (4 silos)',
-    `4 silos de cohetes con 4 módulos de velocidad 3: cada uno monta un cohete cada ${Math.round(t)} s más el despegue, unos ${f1(4 * 60 / (t + 40))} cohetes por minuto en total. ` +
+    `4 silos de cohetes con 4 módulos de velocidad 2: cada uno monta un cohete cada ${Math.round(t)} s más el despegue, unos ${f1(4 * 60 / (t + 40))} cohetes por minuto en total. ` +
     'Los robots les llevan procesadores, estructuras de baja densidad y combustible de cohete, y los silos cargan solos lo que pidan tus plataformas espaciales: ciencia metalúrgica, placas y carburo de tungsteno, perforadoras grandes, fundiciones o cintas turbo. ' +
     'Los procesadores y el combustible de cohete suelen llegar de otro planeta; las estructuras de baja densidad se pueden colar aquí.', p);
 }
@@ -285,7 +287,7 @@ function baseBlock() {
 
 // ----- consumo eléctrico estimado (valores de Factorio 2.0: máquina, módulos y balizas que la alcanzan) -----
 const POWER_KW = { foundry: 2500, 'chemical-plant': 210, 'assembling-machine-3': 375, 'big-mining-drill': 300, 'rocket-silo': 250, beacon: 480, roboport: 2050, 'bulk-inserter': 40 };
-const MOD_E = { 'productivity-module-3': 0.8, 'speed-module-3': 0.7 };
+const MOD_E = { [MOD.prod.item]: MOD.prod.energy, [MOD.speed.item]: MOD.speed.energy };
 export function powerMW(ents) {
   const beacons = ents.filter(e => e.name === 'beacon'); let kw = 0;
   for (const e of ents) {
@@ -293,7 +295,7 @@ export function powerMW(ents) {
     if (e.name === 'beacon' || e.name === 'roboport' || e.name === 'bulk-inserter') { kw += base; continue; }   // roboport cargando robots a tope
     let c = 1; for (const it of (e.extra && e.extra.items) || []) c += (MOD_E[it.id.name] || 0) * it.items.in_inventory.length;
     const [w, h] = sz(def(e.name), e.dir), n = beacons.filter(b => Math.abs(b.x - e.x) < 4.5 + w / 2 && Math.abs(b.y - e.y) < 4.5 + h / 2).length;
-    if (n) c += Math.sqrt(n) * 1.5 * 2 * 0.7;
+    if (n) c += Math.sqrt(n) * 1.5 * 2 * MOD.speed.energy;
     kw += base * Math.max(0.2, c);
   }
   return kw / 1000;
@@ -381,10 +383,10 @@ function outpost(B, item, label, n) {
     if (q.meta.schedules) sched = BP.mapSched(q.meta.schedules, k => map.get(k));
   };
   add(B.loopW, -BLOCK, 0); add(B.load[item], 0, 0);
-  for (let i = 0; i < 2; i++) add(i < n ? B.mine : B.base, BLOCK * i, BLOCK);
+  for (let i = 0; i < Math.max(2, n); i++) add(i < n ? B.mine : B.base, BLOCK * i, BLOCK);
   return BP.buildBlueprint({ ents, wires: [], tiles, target: 2, meta: { label: `Puesto minero de ${label}`, schedules: sched,
     extraBp: BP.setSnap({}, { w: BLOCK, h: BLOCK, abs: true, ox: -BLOCK, oy: 0 }),
-    description: `${n === 2 ? 'Dos bloques' : 'Un bloque'} de minería con perforadoras grandes, la estación de carga de ${label} encima y el retorno al oeste. Colócalo sobre un yacimiento de ${label} y lleva su vía (sale abierta por el este) hasta la de la fábrica con tramos de línea principal y curvas: sus subestaciones le llevan también la corriente. Gasta unos ${f1(powerMW(ents))} MW. ` +
+    description: `${n > 1 ? `${n} bloques` : 'Un bloque'} de minería con perforadoras grandes, la estación de carga de ${label} encima y el retorno al oeste. Colócalo sobre un yacimiento de ${label} y lleva su vía (sale abierta por el este) hasta la de la fábrica con tramos de línea principal y curvas: sus subestaciones le llevan también la corriente. Gasta unos ${f1(powerMW(ents))} MW. ` +
       `Cada tren 1-4 lleva ${TRAIN_LOAD} de ${label}. Los robots del puesto llevan lo que sacan las perforadoras a la estación.` } });
 }
 
@@ -438,7 +440,8 @@ export function vulcanusBook() {
     line: linePiece(), corner: cornerPiece(), loopE: loopPiece(false), loopW: loopPiece(true), unload: stationPiece('unload'),
   };
   B.load = { 'tungsten-ore': stationPiece('load', 'tungsten-ore', 'tungsteno'), coal: stationPiece('load', 'coal', 'carbón'), calcite: stationPiece('load', 'calcite', 'calcita') };
-  const posts = [outpost(B, 'tungsten-ore', 'tungsteno', 2), outpost(B, 'coal', 'carbón', 1), outpost(B, 'calcite', 'calcita', 1)];
+  const nTung = Math.ceil((B.plate.stats.items[0] + 2 * B.carb.stats.ore) / B.mine.stats.ore);   // bloques de minería que pide la fábrica
+  const posts = [outpost(B, 'tungsten-ore', 'tungsteno', nTung), outpost(B, 'coal', 'carbón', 1), outpost(B, 'calcite', 'calcita', 1)];
   const kids = [megabase(B), ...posts, B.line, B.corner, B.loopE, B.loopW, B.unload, B.load['tungsten-ore'], B.lava, B.base, B.power, B.iron, B.copper, B.steel, B.mine, B.carb, B.plate, B.sci, B.exp];
   kids.forEach((k, i) => { k.blueprint.label = String(i).padStart(2, '0') + ' · ' + k.blueprint.label; });
   return BP.buildBook('Megabase Vulcano: superproducción y exportación', kids, 2,
